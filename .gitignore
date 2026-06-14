@@ -1,0 +1,8 @@
+/target
+nodes/*/data/
+.tplot/
+*.parquet
+*.duckdb
+.kairn.log
+.kairn.state
+.kairn.todo
