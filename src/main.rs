@@ -5,6 +5,8 @@ mod engine;
 mod handler;
 mod lineage_data;
 mod node;
+#[allow(dead_code)]
+mod scripting;
 mod slots;
 mod views;
 mod workspace;
