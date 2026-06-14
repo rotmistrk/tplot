@@ -6,13 +6,29 @@ use txv_widgets::tiled_workspace::TiledWorkspace;
 use crate::app::AppState;
 use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
+use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
+use crate::views::help::HelpView;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT};
 use crate::views::table::TableView;
 
 pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     let cmd = ctx.command();
-    if cmd == CM_REPL_SUBMIT {
-        handle_repl_submit(ctx, state);
+    match cmd {
+        CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
+        CM_APP_QUIT => {
+            ctx.sink().push_command(txv_core::commands::CM_QUIT, None);
+        }
+        CM_SHOW_HELP => {
+            let ws = ctx
+                .desktop_mut()
+                .as_any_mut()
+                .and_then(|a| a.downcast_mut::<TiledWorkspace>());
+            if let Some(ws) = ws {
+                let slot = SlotId::Center as usize;
+                ws.insert_tab(slot, "Help", Box::new(HelpView::new()));
+            }
+        }
+        _ => {}
     }
 }
 

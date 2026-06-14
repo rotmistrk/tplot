@@ -3,7 +3,6 @@
 mod app;
 mod engine;
 mod handler;
-#[allow(dead_code)]
 mod help;
 #[allow(dead_code)]
 mod jobs;
@@ -14,6 +13,7 @@ mod node_id;
 #[allow(dead_code)]
 mod scripting;
 mod slots;
+mod status;
 mod views;
 mod workspace;
 
@@ -23,12 +23,12 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use txv_core::program::Program;
-use txv_core::status_bar::StatusBar;
 use txv_render::backend::CrosstermBackend;
 use txv_render::ColorMode;
 
 use crate::app::AppState;
 use crate::handler::handle_command;
+use crate::status::build_status_bar;
 use crate::workspace::build_workspace;
 
 #[derive(Parser)]
@@ -46,7 +46,7 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let ws = build_workspace(&root_dir);
-    let status = StatusBar::new();
+    let status = build_status_bar(&ws);
     let mut program = Program::new(Box::new(status), Box::new(ws));
     let mut app_state = AppState::new(root_dir);
 
