@@ -109,14 +109,20 @@ fn execute_command(
             let msg = format!("{} rows, {} cols", result.row_count, result.columns.len());
             let tab_name = var_name.unwrap_or_else(|| "result".to_string());
 
-            // Auto-register node in lineage tree.
-            let parent = crate::registry::detect_parent_table(&query);
-            let full_cmd = format!("sql -name {tab_name} {{{query}}}");
-            state
-                .registry
-                .add_query(&tab_name, &full_cmd, parent.as_deref(), Some(result.row_count as u64));
-
-            insert_table_tab(desktop, &tab_name, result);
+            // Detect CREATE TABLE vs SELECT.
+            let upper = query.trim().to_uppercase();
+            if upper.starts_with("CREATE") {
+                let table_name = extract_create_table_name(&query).unwrap_or_else(|| tab_name.clone());
+                let full_cmd = format!("sql {{{query}}}");
+                state.registry.add_table(&table_name, &full_cmd, None);
+            } else {
+                let parent = crate::registry::detect_parent_table(&query);
+                let full_cmd = format!("sql -name {tab_name} {{{query}}}");
+                state
+                    .registry
+                    .add_query(&tab_name, &full_cmd, parent.as_deref(), Some(result.row_count as u64));
+                insert_table_tab(desktop, &tab_name, result);
+            }
             Ok(msg)
         }
         ScriptCommand::Into { table, source, .. } => match source {
@@ -155,6 +161,22 @@ fn execute_command(
         ScriptCommand::Export { .. } => Ok("Export: not yet implemented".into()),
         ScriptCommand::Budget { .. } => Ok("Budget: not yet implemented".into()),
     }
+}
+
+/// Extract table name from "CREATE TABLE <name> AS ..." or "CREATE OR REPLACE TABLE <name> ...".
+fn extract_create_table_name(sql: &str) -> Option<String> {
+    let upper = sql.to_uppercase();
+    let table_pos = upper.find("TABLE ")?;
+    let after = &sql[table_pos + 6..];
+    let name = after
+        .trim()
+        .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
+        .next()?
+        .trim_matches('"');
+    if name.is_empty() || name.to_uppercase() == "AS" || name.to_uppercase() == "IF" {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 fn insert_table_tab(desktop: &mut dyn txv_core::prelude::View, name: &str, result: crate::engine::QueryResult) {
