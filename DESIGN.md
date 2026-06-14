@@ -218,6 +218,19 @@ into events -file events.parquet
 Format options: `-csv`, `-tsv`, `-json` (JSON lines), `-sep <char>`,
 `-regex <pattern> -cols <names>`, `-file <path>`.
 
+Compression options: `-gz`, `-zstd`, `-bz2` (auto-detected from extension
+for `-file`, explicit for piped data). Decompression is streaming, constant memory.
+
+Storage: DuckDB natively supports `s3://` paths via httpfs extension.
+
+### Resource Budget
+
+```tcl
+budget -cpu 6          ;# DuckDB threads (default: total CPUs - 2)
+budget -ram 4G         ;# DuckDB memory_limit (default: 75% available)
+budget -disk 50G       ;# warn when cumulative node data exceeds this
+```
+
 ### SQL integration
 
 SQL is natively bound — results stay structured, no parsing needed:
