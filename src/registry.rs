@@ -24,7 +24,6 @@ impl NodeRegistry {
     }
 
     /// Get all nodes (for tree display).
-    #[allow(dead_code)]
     pub(crate) fn nodes(&self) -> &[LiveNode] {
         &self.nodes
     }

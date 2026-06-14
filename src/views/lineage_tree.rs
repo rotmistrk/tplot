@@ -7,12 +7,12 @@ use txv_widgets::TreeTableView;
 use crate::lineage_data::LineageData;
 
 pub(crate) struct LineageTreeView {
-    inner: TreeTableView<LineageData>,
+    pub(crate) inner: TreeTableView<LineageData>,
 }
 
 impl LineageTreeView {
     pub(crate) fn new(data: LineageData) -> Self {
-        let mut view = TreeTableView::new(data, &[3, 10, 6]);
+        let mut view = TreeTableView::new(data, &[4, 8]);
         view.set_show_connectors(true);
         Self { inner: view }
     }

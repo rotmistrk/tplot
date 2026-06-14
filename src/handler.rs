@@ -4,10 +4,12 @@ use txv_core::program::CommandContext;
 use txv_widgets::tiled_workspace::TiledWorkspace;
 
 use crate::app::AppState;
+use crate::registry::NodeRegistry;
 use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
 use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
 use crate::views::help::HelpView;
+use crate::views::lineage_tree::LineageTreeView;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT};
 use crate::views::table::TableView;
 
@@ -62,6 +64,9 @@ fn handle_repl_submit(ctx: &mut CommandContext, state: &mut AppState) {
             }
         }
     }
+
+    // Refresh lineage tree.
+    refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
 
     // Push results back to REPL.
     let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
@@ -160,6 +165,29 @@ fn execute_command(
         ScriptCommand::Plot { .. } => Ok("Plot: not yet implemented".into()),
         ScriptCommand::Export { .. } => Ok("Export: not yet implemented".into()),
         ScriptCommand::Budget { .. } => Ok("Budget: not yet implemented".into()),
+    }
+}
+
+/// Refresh the lineage tree view with current registry state.
+fn refresh_lineage_tree(desktop: &mut dyn txv_core::prelude::View, registry: &NodeRegistry) {
+    let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
+        return;
+    };
+    let slot = SlotId::Left as usize;
+    let Some(panel) = ws.panel_mut(slot) else { return };
+    let count = panel.tab_count();
+    let idx = (0..count).find(|&i| {
+        panel
+            .view_at_mut(i)
+            .and_then(|v| v.as_any_mut())
+            .is_some_and(|a| a.downcast_ref::<LineageTreeView>().is_some())
+    });
+    if let Some(i) = idx {
+        let view = panel.view_at_mut(i).unwrap();
+        if let Some(tree) = view.as_any_mut().and_then(|a| a.downcast_mut::<LineageTreeView>()) {
+            let nodes = registry.nodes().to_vec();
+            tree.inner.data_mut().update(nodes);
+        }
     }
 }
 

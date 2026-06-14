@@ -44,7 +44,8 @@ pub(crate) fn build_workspace(root_dir: &Path) -> TiledWorkspace {
 
 fn add_left_tabs(ws: &mut TiledWorkspace, root_dir: &Path) {
     let slot = SlotId::Left as usize;
-    let lineage_data = LineageData::new(root_dir);
+    let nodes = crate::live_node::load_nodes_from_disk(&root_dir.join("nodes"));
+    let lineage_data = LineageData::from_nodes(nodes);
     let lineage_view = LineageTreeView::new(lineage_data);
     ws.insert_tab(slot, "Lineage", Box::new(lineage_view));
     insert(ws, slot, "Library", "Recipes & tools");
