@@ -30,6 +30,25 @@ fn arg_str(args: &[TclValue], idx: usize) -> Result<String, TclError> {
         .ok_or_else(|| TclError::new(format!("missing argument {idx}")))
 }
 
+/// Find the first positional (non-flag) argument, skipping -flag and their values.
+fn positional_arg(args: &[TclValue], nth: usize) -> Result<String, TclError> {
+    let mut count = 0;
+    let mut i = 0;
+    while i < args.len() {
+        let s = args[i].to_string();
+        if s.starts_with('-') {
+            i += 2; // skip flag + its value
+        } else {
+            if count == nth {
+                return Ok(s);
+            }
+            count += 1;
+            i += 1;
+        }
+    }
+    Err(TclError::new(format!("missing positional argument {nth}")))
+}
+
 fn find_flag(args: &[TclValue], flag: &str) -> Option<usize> {
     args.iter().position(|a| a.to_string() == flag)
 }
@@ -41,7 +60,7 @@ fn flag_value(args: &[TclValue], flag: &str) -> Option<String> {
 
 fn register_sql(interp: &mut Interpreter, cmds: Arc<Mutex<Vec<ScriptCommand>>>) {
     interp.register_fn("sql", move |_interp, args| {
-        let query = arg_str(args, 0)?;
+        let query = positional_arg(args, 0)?;
         let var_name = flag_value(args, "-name");
         push(
             &cmds,

@@ -119,6 +119,21 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_with_name() {
+        let mut engine = ScriptEngine::new();
+        engine.eval("sql -name mytab {SELECT 42}").unwrap();
+
+        let cmds = engine.drain_commands();
+        match &cmds[0] {
+            ScriptCommand::Sql { query, var_name } => {
+                assert_eq!(query, "SELECT 42");
+                assert_eq!(var_name.as_deref(), Some("mytab"));
+            }
+            _ => panic!("expected Sql command"),
+        }
+    }
+
+    #[test]
     fn test_into_command() {
         let mut engine = ScriptEngine::new();
         engine.eval("into flows data.csv -csv").unwrap();
