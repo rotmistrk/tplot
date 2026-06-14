@@ -6,10 +6,15 @@ pub(crate) fn help_text() -> String {
 ═══ tplot — Terminal Data Analysis ═══
 
 QUICK START
-  into mytable -file data.csv          Import a CSV file
-  sql {SELECT * FROM mytable LIMIT 10} Query the data
-  derive filtered {SELECT * FROM mytable WHERE x > 100}
-                                        Create child node
+  # Generate sample data (no CSV needed):
+  sql {CREATE TABLE auth AS SELECT * FROM (VALUES ('2024-01-01 10:00:01','root','192.168.1.100','failed'), ('2024-01-01 10:00:03','admin','10.0.0.5','failed'), ('2024-01-01 10:01:15','root','192.168.1.100','failed'), ('2024-01-01 10:02:30','deploy','172.16.0.1','failed'), ('2024-01-01 10:05:00','root','192.168.1.100','failed')) AS t(ts, username, src_ip, status)}
+
+  # Query it:
+  sql -name by_user {SELECT username, count(*) as attempts FROM auth GROUP BY username ORDER BY attempts DESC}
+  sql -name by_ip {SELECT src_ip, count(*) as attempts FROM auth GROUP BY src_ip ORDER BY attempts DESC}
+
+  # Or import a file:
+  into mytable -file /path/to/data.csv
 
 COMMANDS
   ✓ into <table> <source> ?opts?       Import data into DuckDB
