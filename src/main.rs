@@ -3,6 +3,8 @@
 mod app;
 mod engine;
 mod handler;
+#[allow(dead_code)]
+mod lineage_data;
 mod node;
 mod slots;
 mod views;
