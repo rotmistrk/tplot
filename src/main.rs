@@ -6,6 +6,8 @@ mod handler;
 mod lineage_data;
 mod node;
 #[allow(dead_code)]
+mod node_id;
+#[allow(dead_code)]
 mod scripting;
 mod slots;
 mod views;
