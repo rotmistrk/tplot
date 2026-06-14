@@ -80,9 +80,22 @@ impl ReplView {
     }
 
     fn handle_key(&mut self, ev: &Event) -> HandleResult {
-        let Event::Key(key) = ev else {
-            return HandleResult::Ignored;
-        };
+        match ev {
+            Event::Key(key) => self.handle_key_event(*key),
+            Event::Paste(text) => {
+                // Insert pasted text at cursor, stripping newlines.
+                let clean: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+                self.input.insert_str(self.cursor, &clean);
+                self.cursor += clean.len();
+                self.hist_pos = None;
+                self.state.mark_dirty();
+                HandleResult::Consumed
+            }
+            _ => HandleResult::Ignored,
+        }
+    }
+
+    fn handle_key_event(&mut self, key: txv_core::event::KeyEvent) -> HandleResult {
         let code = key.code();
         match code {
             KeyCode::Enter => {
