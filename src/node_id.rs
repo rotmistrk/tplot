@@ -63,12 +63,12 @@ impl NodeId {
         self.segments.len() - 1
     }
 
-    /// Convert to filesystem-safe directory path (nested).
+    /// Convert to filesystem-safe directory path (nested, 0-padded).
     pub(crate) fn to_dir_path(&self) -> String {
         self.segments
             .iter()
             .map(|s| match s {
-                Segment::Num(n) => n.to_string(),
+                Segment::Num(n) => format!("{n:03}"),
                 Segment::Name(name) => name.clone(),
             })
             .collect::<Vec<_>>()
@@ -103,14 +103,14 @@ mod tests {
         let id = NodeId::parse("1.0.2");
         assert_eq!(id.segments.len(), 3);
         assert_eq!(id.to_dotted(), "1.0.2");
-        assert_eq!(id.to_dir_path(), "1/0/2");
+        assert_eq!(id.to_dir_path(), "001/000/002");
     }
 
     #[test]
     fn test_parse_named() {
         let id = NodeId::parse("1.base.2");
         assert_eq!(id.to_dotted(), "1.base.2");
-        assert_eq!(id.to_dir_path(), "1/base/2");
+        assert_eq!(id.to_dir_path(), "001/base/002");
     }
 
     #[test]
@@ -129,6 +129,6 @@ mod tests {
 
         let grandchild = named.child(1);
         assert_eq!(grandchild.to_dotted(), "1.base.1");
-        assert_eq!(grandchild.to_dir_path(), "1/base/1");
+        assert_eq!(grandchild.to_dir_path(), "001/base/001");
     }
 }

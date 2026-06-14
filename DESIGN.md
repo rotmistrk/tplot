@@ -82,7 +82,7 @@ Nodes use hierarchical dotted paths: `1.0.2` means "root 1, child 0, grandchild 
 - Numeric segments auto-increment (next sibling = prev + 1)
 - Users can assign logical names: `1.0` → name "base" → referenced as `1.base`
 - Named segments replace numeric: `1.base.1` ≡ `1.0.1` if `1.0` is named "base"
-- On disk, IDs map to nested directories: `1.base.2` → `nodes/1/base/2/`
+- On disk, IDs map to nested directories: `1.base.2` → `nodes/001/base/002/`
 
 ```
 0                    first root
