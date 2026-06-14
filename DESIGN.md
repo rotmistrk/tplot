@@ -93,6 +93,28 @@ Nodes use hierarchical dotted paths: `1.0.2` means "root 1, child 0, grandchild 
 1.base.1             second grandchild
 ```
 
+### Tree-Table Display
+
+The lineage tree is a **tree-table** with toggleable columns:
+
+```
+│ Node              │ St │ ETA/Runtime  │ Size   │
+├───────────────────┼────┼──────────────┼────────┤
+│ ▸ Raw Flows       │ ✓  │   00:01:12.. │ 450MB  │
+│   ├─▸ TCP Only    │ >  │ ..00:00:34   │  12MB  │
+│   │  └─◇ By Dest  │    │              │        │
+│   └─▸ High Ports  │ ✓  │   00:00:03.. │   2MB  │
+```
+
+- Status: `✓` done, `>` running, `◇` ghost, `⚠` stale, `✗` error, `❄` frozen
+- Time: `hh:mm:ss..` = elapsed runtime, `..hh:mm:ss` = ETA (aligned on `:`)
+- Size: node data size (toggleable: node-only vs cumulative subtree)
+- User can show/hide columns
+
+Running nodes show live progress. Cancel with Ctrl+C on focused running node.
+
+Statusbar for focused node: `[TCP Only] importing 1,234,567/2,300,000 rows (54%) ETA 00:00:34`
+
 ### Each node is:
 
 - A **dataset** (DuckDB table/view)
