@@ -3,6 +3,7 @@
 mod app;
 mod engine;
 mod handler;
+mod node;
 mod slots;
 mod views;
 mod workspace;
