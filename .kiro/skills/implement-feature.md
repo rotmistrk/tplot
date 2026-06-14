@@ -18,13 +18,24 @@ When implementing a new feature or fixing a bug in tplot.
    - After modifying EACH file: run `check_file` on it, fix violations immediately
    - Max 240 code lines per file, 40 per function, 7 params
 
-4. **Verify** — Run the full cycle:
+4. **Update Help** — Update `src/help.rs` to reflect new/changed commands:
+   - Mark newly implemented commands with ✓
+   - Add working examples that use the new feature
+   - Keep planned commands marked with ○
+
+5. **Verify** — Run the full cycle:
    - `cargo fmt`
    - `cargo build`
    - `cargo clippy -- -D warnings`
    - `cargo test`
 
-5. **Commit** — Stage, commit with descriptive message.
+5. **Verify** — Run the full cycle:
+   - `cargo fmt`
+   - `cargo build`
+   - `cargo clippy -- -D warnings`
+   - `cargo test`
+
+6. **Commit** — Stage, commit with descriptive message.
 
 ## Consulting Kairn
 When implementing a feature that has a kairn equivalent:

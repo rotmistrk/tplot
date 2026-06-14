@@ -4,6 +4,8 @@ mod app;
 mod engine;
 mod handler;
 #[allow(dead_code)]
+mod help;
+#[allow(dead_code)]
 mod jobs;
 mod lineage_data;
 mod node;
