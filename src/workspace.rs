@@ -5,11 +5,13 @@ use std::path::Path;
 use txv_widgets::tiled_workspace::types::{PanelConfig, PanelPosition, SplitNode};
 use txv_widgets::tiled_workspace::TiledWorkspace;
 
+use crate::lineage_data::LineageData;
 use crate::slots::SlotId;
+use crate::views::lineage_tree::LineageTreeView;
 use crate::views::placeholder::PlaceholderView;
 
 /// Build the tplot workspace with 4 panels.
-pub(crate) fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
+pub(crate) fn build_workspace(root_dir: &Path) -> TiledWorkspace {
     let configs = vec![
         PanelConfig::fixed("Lineage", PanelPosition::Left),
         PanelConfig::new("Main", PanelPosition::Center).with_splittable(),
@@ -41,7 +43,7 @@ pub(crate) fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
     let mut ws = TiledWorkspace::new(configs, wide_layout, narrow_layout, 300);
     ws.set_handle_keys(false);
 
-    add_left_tabs(&mut ws);
+    add_left_tabs(&mut ws, root_dir);
     add_center_tabs(&mut ws);
     add_tools_tabs(&mut ws);
     add_bottom_tabs(&mut ws);
@@ -50,9 +52,13 @@ pub(crate) fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
     ws
 }
 
-fn add_left_tabs(ws: &mut TiledWorkspace) {
+fn add_left_tabs(ws: &mut TiledWorkspace, root_dir: &Path) {
     let slot = SlotId::Left as usize;
-    insert(ws, slot, "Lineage", "Analysis lineage tree");
+
+    let lineage_data = LineageData::new(root_dir);
+    let lineage_view = LineageTreeView::new(lineage_data);
+    ws.insert_tab(slot, "Lineage", Box::new(lineage_view));
+
     insert(ws, slot, "Library", "Recipes & tools");
     insert(ws, slot, "Todo", "Task tracking");
     if let Some(panel) = ws.panel_mut(slot) {

@@ -37,6 +37,7 @@ impl LineageData {
     }
 
     /// Reload nodes from disk.
+    #[allow(dead_code)]
     pub(crate) fn refresh(&mut self) {
         self.nodes = node::load_all_nodes(&self.project_dir);
         self.rebuild();
@@ -103,6 +104,7 @@ impl LineageData {
         }
     }
 
+    #[allow(dead_code)]
     fn node_for_visible(&self, row: usize) -> Option<&Node> {
         let entry = self.entries.get(*self.visible.get(row)?)?;
         self.nodes.get(entry.node_idx)
