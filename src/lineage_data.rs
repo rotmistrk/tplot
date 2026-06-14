@@ -1,11 +1,16 @@
-//! Lineage tree data model — implements TreeData for the node DAG.
+//! Lineage tree-table data — implements TreeTableSource for the node DAG.
 
 use std::path::{Path, PathBuf};
 
 use txv_core::cell::Style;
-use txv_widgets::tree_view::TreeData;
+use txv_widgets::tree_table_source::TreeTableSource;
 
 use crate::node::{self, Node, NodeState};
+
+/// Column indices for the tree-table.
+const COL_STATUS: usize = 0;
+const COL_TIME: usize = 1;
+const COL_SIZE: usize = 2;
 
 /// A flattened tree entry for display.
 struct TreeEntry {
@@ -15,12 +20,18 @@ struct TreeEntry {
     is_link: bool,
 }
 
-/// Lineage tree data source for TreeView.
+/// Lineage tree-table data source.
 pub(crate) struct LineageData {
     nodes: Vec<Node>,
     entries: Vec<TreeEntry>,
     visible: Vec<usize>,
     project_dir: PathBuf,
+    // Column visibility (user can toggle).
+    show_status: bool,
+    show_time: bool,
+    show_size: bool,
+    // Cached cell strings (regenerated on rebuild).
+    cell_cache: Vec<[String; 3]>,
 }
 
 impl LineageData {
@@ -31,24 +42,26 @@ impl LineageData {
             entries: vec![],
             visible: vec![],
             project_dir: project_dir.to_path_buf(),
+            show_status: true,
+            show_time: true,
+            show_size: true,
+            cell_cache: vec![],
         };
         data.rebuild();
         data
     }
 
-    /// Reload nodes from disk.
     #[allow(dead_code)]
     pub(crate) fn refresh(&mut self) {
         self.nodes = node::load_all_nodes(&self.project_dir);
         self.rebuild();
     }
 
-    /// Rebuild flat entry list and visibility from nodes.
     fn rebuild(&mut self) {
         self.entries.clear();
         self.visible.clear();
+        self.cell_cache.clear();
 
-        // Find root nodes (no parent)
         let roots: Vec<usize> = self
             .nodes
             .iter()
@@ -60,9 +73,8 @@ impl LineageData {
         for &root_idx in &roots {
             self.add_subtree(root_idx, 0);
         }
-
-        // All entries visible initially (expand later)
         self.visible = (0..self.entries.len()).collect();
+        self.rebuild_cells();
     }
 
     fn add_subtree(&mut self, node_idx: usize, depth: usize) {
@@ -74,7 +86,6 @@ impl LineageData {
         });
 
         let dir_name = self.nodes[node_idx].dir_name.clone();
-        // Find children (nodes whose parent matches this dir_name)
         let children: Vec<usize> = self
             .nodes
             .iter()
@@ -87,13 +98,11 @@ impl LineageData {
             self.add_subtree(child_idx, depth + 1);
         }
 
-        // Add link entries for nodes that depend on this one (DAG edges)
         let link_count = self
             .nodes
             .iter()
             .filter(|n| n.meta.also_depends.contains(&dir_name))
             .count();
-
         for _ in 0..link_count {
             self.entries.push(TreeEntry {
                 node_idx,
@@ -104,106 +113,81 @@ impl LineageData {
         }
     }
 
-    #[allow(dead_code)]
-    fn node_for_visible(&self, row: usize) -> Option<&Node> {
-        let entry = self.entries.get(*self.visible.get(row)?)?;
-        self.nodes.get(entry.node_idx)
-    }
-
-    fn state_icon(state: NodeState) -> &'static str {
-        match state {
-            NodeState::Active => "▸",
-            NodeState::Materialized => "▸",
-            NodeState::Frozen => "❄",
-            NodeState::Ghost => "◇",
-            NodeState::Stale => "⚠",
-            NodeState::Running => "⟳",
-            NodeState::Error => "✗",
+    fn rebuild_cells(&mut self) {
+        self.cell_cache.clear();
+        for entry in &self.entries {
+            let node = &self.nodes[entry.node_idx];
+            let status = if entry.is_link {
+                "⤴".to_string()
+            } else {
+                state_icon(node.meta.state).to_string()
+            };
+            let time = format_time(node);
+            let size = format_size(node.meta.size.data_bytes);
+            self.cell_cache.push([status, time, size]);
         }
     }
 }
 
-impl TreeData for LineageData {
-    fn root_count(&self) -> usize {
-        self.entries.iter().filter(|e| e.depth == 0).count()
-    }
-
-    fn child_count(&self, id: usize) -> usize {
-        let my_depth = match self.entries.get(id) {
-            Some(e) => e.depth,
-            None => return 0,
-        };
-        let mut count = 0;
-        for e in self.entries.iter().skip(id + 1) {
-            if e.depth <= my_depth {
-                break;
-            }
-            if e.depth == my_depth + 1 {
-                count += 1;
-            }
-        }
-        count
-    }
-
-    fn label(&self, id: usize) -> &str {
-        match self.entries.get(id) {
-            Some(entry) => {
-                if let Some(node) = self.nodes.get(entry.node_idx) {
-                    &node.meta.name
-                } else {
-                    "?"
-                }
-            }
-            None => "?",
-        }
-    }
-
-    fn is_expandable(&self, id: usize) -> bool {
-        self.child_count(id) > 0
-    }
-
-    fn is_expanded(&self, id: usize) -> bool {
-        self.entries.get(id).is_some_and(|e| e.expanded)
-    }
-
-    fn toggle(&mut self, id: usize) {
-        if let Some(entry) = self.entries.get_mut(id) {
-            entry.expanded = !entry.expanded;
-        }
-        self.rebuild_visible();
-    }
-
-    fn depth(&self, id: usize) -> usize {
-        self.entries.get(id).map_or(0, |e| e.depth)
-    }
-
+impl TreeTableSource for LineageData {
     fn visible_count(&self) -> usize {
         self.visible.len()
     }
 
-    fn visible_id(&self, row: usize) -> usize {
-        self.visible.get(row).copied().unwrap_or(0)
+    fn label(&self, row: usize) -> &str {
+        let entry_idx = self.visible[row];
+        let entry = &self.entries[entry_idx];
+        &self.nodes[entry.node_idx].meta.name
     }
 
-    fn icon(&self, id: usize) -> Option<&str> {
-        let entry = self.entries.get(id)?;
-        if entry.is_link {
-            return Some("⤴");
-        }
-        let node = self.nodes.get(entry.node_idx)?;
-        Some(Self::state_icon(node.meta.state))
+    fn depth(&self, row: usize) -> usize {
+        self.entries[self.visible[row]].depth
     }
 
-    fn style(&self, id: usize) -> Style {
-        let entry = match self.entries.get(id) {
-            Some(e) => e,
-            None => return Style::default(),
-        };
+    fn is_expandable(&self, row: usize) -> bool {
+        let entry_idx = self.visible[row];
+        let depth = self.entries[entry_idx].depth;
+        self.entries.get(entry_idx + 1).is_some_and(|e| e.depth > depth)
+    }
+
+    fn is_expanded(&self, row: usize) -> bool {
+        self.entries[self.visible[row]].expanded
+    }
+
+    fn toggle(&mut self, row: usize) {
+        let entry_idx = self.visible[row];
+        self.entries[entry_idx].expanded = !self.entries[entry_idx].expanded;
+        self.rebuild_visible();
+    }
+
+    fn style(&self, row: usize) -> Style {
+        let entry = &self.entries[self.visible[row]];
         if entry.is_link {
             Style::default().with_fg(txv_core::cell::Color::Ansi(245))
         } else {
             Style::default()
         }
+    }
+
+    fn column_count(&self) -> usize {
+        let mut n = 0;
+        if self.show_status {
+            n += 1;
+        }
+        if self.show_time {
+            n += 1;
+        }
+        if self.show_size {
+            n += 1;
+        }
+        n
+    }
+
+    fn cell(&self, row: usize, col: usize) -> &str {
+        let entry_idx = self.visible[row];
+        let cells = &self.cell_cache[entry_idx];
+        let real_col = self.map_col(col);
+        &cells[real_col]
     }
 }
 
@@ -220,7 +204,6 @@ impl LineageData {
             }
             self.visible.push(idx);
             if !entry.expanded {
-                // Check if it has children (next entry has greater depth)
                 let has_children = self.entries.get(idx + 1).is_some_and(|e| e.depth > entry.depth);
                 if has_children {
                     skip_below = Some(entry.depth);
@@ -228,4 +211,64 @@ impl LineageData {
             }
         }
     }
+
+    /// Map visible column index to internal cell array index.
+    fn map_col(&self, col: usize) -> usize {
+        let mut remaining = col;
+        if self.show_status {
+            if remaining == 0 {
+                return COL_STATUS;
+            }
+            remaining -= 1;
+        }
+        if self.show_time {
+            if remaining == 0 {
+                return COL_TIME;
+            }
+            remaining -= 1;
+        }
+        if self.show_size && remaining == 0 {
+            return COL_SIZE;
+        }
+        COL_STATUS // fallback
+    }
+}
+
+fn state_icon(state: NodeState) -> &'static str {
+    match state {
+        NodeState::Active => "▸",
+        NodeState::Materialized => "✓",
+        NodeState::Frozen => "❄",
+        NodeState::Ghost => "◇",
+        NodeState::Stale => "⚠",
+        NodeState::Running => ">",
+        NodeState::Error => "✗",
+    }
+}
+
+fn format_time(node: &Node) -> String {
+    let secs = node.meta.timing.last_run_secs;
+    if secs <= 0.0 {
+        return String::new();
+    }
+    let h = (secs / 3600.0) as u32;
+    let m = ((secs % 3600.0) / 60.0) as u32;
+    let s = (secs % 60.0) as u32;
+    format!("{h:02}:{m:02}:{s:02}..")
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes == 0 {
+        return String::new();
+    }
+    if bytes < 1024 {
+        return format!("{bytes}B");
+    }
+    if bytes < 1024 * 1024 {
+        return format!("{}KB", bytes / 1024);
+    }
+    if bytes < 1024 * 1024 * 1024 {
+        return format!("{}MB", bytes / (1024 * 1024));
+    }
+    format!("{}GB", bytes / (1024 * 1024 * 1024))
 }

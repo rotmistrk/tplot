@@ -1,18 +1,18 @@
-//! Lineage tree view — wraps TreeView<LineageData> for the left panel.
+//! Lineage tree-table view — wraps TreeTableView<LineageData> for the left panel.
 
 use txv_core::cursor::CursorRequest;
 use txv_core::prelude::*;
-use txv_widgets::TreeView;
+use txv_widgets::TreeTableView;
 
 use crate::lineage_data::LineageData;
 
 pub(crate) struct LineageTreeView {
-    inner: TreeView<LineageData>,
+    inner: TreeTableView<LineageData>,
 }
 
 impl LineageTreeView {
     pub(crate) fn new(data: LineageData) -> Self {
-        let mut view = TreeView::new(data);
+        let mut view = TreeTableView::new(data, &[3, 10, 6]);
         view.set_show_connectors(true);
         Self { inner: view }
     }
