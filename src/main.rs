@@ -7,9 +7,13 @@ mod help;
 #[allow(dead_code)]
 mod jobs;
 mod lineage_data;
+#[allow(dead_code)]
+mod live_node;
+#[allow(dead_code)]
 mod node;
 #[allow(dead_code)]
 mod node_id;
+mod registry;
 #[allow(dead_code)]
 mod scripting;
 mod slots;

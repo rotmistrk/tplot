@@ -108,6 +108,14 @@ fn execute_command(
             let result = state.engine().query(&query)?;
             let msg = format!("{} rows, {} cols", result.row_count, result.columns.len());
             let tab_name = var_name.unwrap_or_else(|| "result".to_string());
+
+            // Auto-register node in lineage tree.
+            let parent = crate::registry::detect_parent_table(&query);
+            let full_cmd = format!("sql -name {tab_name} {{{query}}}");
+            state
+                .registry
+                .add_query(&tab_name, &full_cmd, parent.as_deref(), Some(result.row_count as u64));
+
             insert_table_tab(desktop, &tab_name, result);
             Ok(msg)
         }
@@ -115,8 +123,18 @@ fn execute_command(
             crate::scripting::ImportSource::File(path) => {
                 let p = std::path::Path::new(&path);
                 let result = state.engine().import_csv(p, &table)?;
-                let count = result.rows.first().and_then(|r| r.first()).cloned().unwrap_or_default();
-                // Show a preview of the imported table.
+                let count: u64 = result
+                    .rows
+                    .first()
+                    .and_then(|r| r.first())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+
+                // Register as materialized table.
+                let full_cmd = format!("into {table} -file {path}");
+                state.registry.add_table(&table, &full_cmd, Some(count));
+
+                // Show preview.
                 let preview = state.engine().query(&format!("SELECT * FROM \"{table}\" LIMIT 100"));
                 if let Ok(data) = preview {
                     insert_table_tab(desktop, &table, data);
@@ -125,7 +143,12 @@ fn execute_command(
             }
             crate::scripting::ImportSource::Exec(_) => Err("exec import not yet implemented".into()),
         },
-        ScriptCommand::Derive { name, sql } => Ok(format!("Created node: {name} ({sql})")),
+        ScriptCommand::Derive { name, sql } => {
+            let parent = crate::registry::detect_parent_table(&sql);
+            let full_cmd = format!("derive {name} {{{sql}}}");
+            state.registry.add_query(&name, &full_cmd, parent.as_deref(), None);
+            Ok(format!("Created node: {name}"))
+        }
         ScriptCommand::Freeze => Ok("Node frozen".into()),
         ScriptCommand::Run => Ok("Run: not yet implemented".into()),
         ScriptCommand::Plot { .. } => Ok("Plot: not yet implemented".into()),
