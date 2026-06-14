@@ -159,14 +159,31 @@ Link entries are:
 
 When you select a tree node, the center panel shows tabs:
 
-| Tab | Content |
-|-----|---------|
-| Script | The SQL/Tcl/gnuplot that produces this node from parent |
-| Table | Query result (scrollable columns) |
-| Graph | Plot output (one or more plot configs as sub-tabs/layers) |
-| Info | Registration card (see below) |
+| Tab | Content | Closeable |
+|-----|---------|-----------|
+| Script | The Tcl script that produces this node | No |
+| Card | Registration card (timestamps, logs, comments) | No |
+| History | Running log of REPL commands for this node | Yes |
+| Table (named) | Query results — one per `sql` or `into` | Yes |
+| Plot (named) | Chart output — one per `plot` command | Yes |
 
-### Registration Card (Info tab)
+### Tab creation
+
+- `into flows ...` → creates/updates table tab "flows"
+- `sql {SELECT ...}` → creates/updates table tab "result"
+- `sql -name mytab {SELECT ...}` → creates/updates tab "mytab"
+- `plot bar $data -title "Top 10"` → creates plot tab "Top 10"
+- Script + Card always present for active node
+
+### Tab lifecycle
+
+- **Permanent tabs** (Script, Card): always shown, cannot be closed
+- **Result tabs** (Table, Plot): closeable, data retained until node switch
+- **History**: closeable, reopen with `history` command
+- **Node switch**: parks current tabs, shows new node's tabs
+- Closing = hiding (state preserved in case of reopen)
+
+### Registration Card (Card tab)
 
 - Created timestamp
 - Last run timestamp + duration

@@ -42,11 +42,12 @@ fn flag_value(args: &[TclValue], flag: &str) -> Option<String> {
 fn register_sql(interp: &mut Interpreter, cmds: Arc<Mutex<Vec<ScriptCommand>>>) {
     interp.register_fn("sql", move |_interp, args| {
         let query = arg_str(args, 0)?;
+        let var_name = flag_value(args, "-name");
         push(
             &cmds,
             ScriptCommand::Sql {
                 query: query.clone(),
-                var_name: None,
+                var_name,
             },
         );
         Ok(TclValue::from(query))

@@ -7,6 +7,7 @@ use crate::app::AppState;
 use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT};
+use crate::views::table::TableView;
 
 pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     let cmd = ctx.command();
@@ -33,7 +34,7 @@ fn handle_repl_submit(ctx: &mut CommandContext, state: &mut AppState) {
     let mut output = Vec::new();
     let mut had_error = false;
     for cmd in commands {
-        match execute_command(state, cmd) {
+        match execute_command(state, cmd, ctx.desktop_mut()) {
             Ok(msg) => {
                 if !msg.is_empty() {
                     output.push((false, msg));
@@ -81,17 +82,29 @@ fn find_repl_mut(desktop: &mut dyn txv_core::prelude::View) -> Option<&mut ReplV
     view.as_any_mut()?.downcast_mut::<ReplView>()
 }
 
-fn execute_command(state: &mut AppState, cmd: ScriptCommand) -> Result<String, String> {
+fn execute_command(
+    state: &mut AppState,
+    cmd: ScriptCommand,
+    desktop: &mut dyn txv_core::prelude::View,
+) -> Result<String, String> {
     match cmd {
-        ScriptCommand::Sql { query, .. } => {
+        ScriptCommand::Sql { query, var_name } => {
             let result = state.engine().query(&query)?;
-            Ok(format!("{} rows, {} cols", result.row_count, result.columns.len()))
+            let msg = format!("{} rows, {} cols", result.row_count, result.columns.len());
+            let tab_name = var_name.unwrap_or_else(|| "result".to_string());
+            insert_table_tab(desktop, &tab_name, result);
+            Ok(msg)
         }
         ScriptCommand::Into { table, source, .. } => match source {
             crate::scripting::ImportSource::File(path) => {
                 let p = std::path::Path::new(&path);
                 let result = state.engine().import_csv(p, &table)?;
                 let count = result.rows.first().and_then(|r| r.first()).cloned().unwrap_or_default();
+                // Show a preview of the imported table.
+                let preview = state.engine().query(&format!("SELECT * FROM \"{table}\" LIMIT 100"));
+                if let Ok(data) = preview {
+                    insert_table_tab(desktop, &table, data);
+                }
                 Ok(format!("Imported {count} rows → {table}"))
             }
             crate::scripting::ImportSource::Exec(_) => Err("exec import not yet implemented".into()),
@@ -103,6 +116,20 @@ fn execute_command(state: &mut AppState, cmd: ScriptCommand) -> Result<String, S
         ScriptCommand::Export { .. } => Ok("Export: not yet implemented".into()),
         ScriptCommand::Budget { .. } => Ok("Budget: not yet implemented".into()),
     }
+}
+
+fn insert_table_tab(desktop: &mut dyn txv_core::prelude::View, name: &str, result: crate::engine::QueryResult) {
+    let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
+        return;
+    };
+    let slot = SlotId::Center as usize;
+    // Remove existing tab with same name.
+    #[allow(deprecated)]
+    if let Some(panel) = ws.panel_mut(slot) {
+        panel.close_tab_by_title(name);
+    }
+    let view = TableView::new(name, result);
+    ws.insert_tab(slot, name, Box::new(view));
 }
 
 #[cfg(test)]
@@ -123,7 +150,9 @@ mod tests {
 
         state.scripting().eval("sql {SELECT count(*) FROM t}").unwrap();
         let cmds = state.scripting().drain_commands();
-        let msg = execute_command(&mut state, cmds.into_iter().next().unwrap());
+        // Use a dummy desktop (won't insert tabs in test).
+        let mut ws = crate::workspace::build_workspace(std::path::Path::new("/tmp"));
+        let msg = execute_command(&mut state, cmds.into_iter().next().unwrap(), &mut ws);
         assert!(msg.unwrap().contains("1 rows"));
     }
 
@@ -137,7 +166,8 @@ mod tests {
         let path = csv.to_string_lossy();
         state.scripting().eval(&format!("into tbl -file {path}")).unwrap();
         let cmds = state.scripting().drain_commands();
-        let msg = execute_command(&mut state, cmds.into_iter().next().unwrap());
+        let mut ws = crate::workspace::build_workspace(std::path::Path::new("/tmp"));
+        let msg = execute_command(&mut state, cmds.into_iter().next().unwrap(), &mut ws);
         assert!(msg.unwrap().contains("2 rows"));
     }
 }
