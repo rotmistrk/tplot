@@ -9,6 +9,7 @@ use crate::lineage_data::LineageData;
 use crate::slots::SlotId;
 use crate::views::lineage_tree::LineageTreeView;
 use crate::views::placeholder::PlaceholderView;
+use crate::views::repl::ReplView;
 
 /// Build the tplot workspace with 4 panels.
 pub(crate) fn build_workspace(root_dir: &Path) -> TiledWorkspace {
@@ -73,6 +74,8 @@ fn add_center_tabs(ws: &mut TiledWorkspace) {
 
 fn add_tools_tabs(ws: &mut TiledWorkspace) {
     let slot = SlotId::Tools as usize;
+    let repl = ReplView::new();
+    ws.insert_tab(slot, "Tcl", Box::new(repl));
     insert(ws, slot, "Shell", "Terminal");
     insert(ws, slot, "Messages", "Log output");
 }
