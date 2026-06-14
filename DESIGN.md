@@ -75,6 +75,24 @@ persistent visibility.
 
 The left panel is the primary navigation. It represents the analysis DAG as a tree.
 
+### Node IDs
+
+Nodes use hierarchical dotted paths: `1.0.2` means "root 1, child 0, grandchild 2."
+
+- Numeric segments auto-increment (next sibling = prev + 1)
+- Users can assign logical names: `1.0` → name "base" → referenced as `1.base`
+- Named segments replace numeric: `1.base.1` ≡ `1.0.1` if `1.0` is named "base"
+- On disk, IDs map to nested directories: `1.base.2` → `nodes/1/base/2/`
+
+```
+0                    first root
+1                    second root
+1.0                  first child of 1
+1.base               same as 1.0 (if named "base")
+1.base.0             grandchild
+1.base.1             second grandchild
+```
+
 ### Each node is:
 
 - A **dataset** (DuckDB table/view)
