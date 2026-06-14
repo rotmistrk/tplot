@@ -77,12 +77,26 @@ The left panel is the primary navigation. It represents the analysis DAG as a tr
 
 ### DAG representation:
 
-Joins create multi-parent edges. In the tree, a node appears under its primary parent. Secondary dependencies shown as annotations:
+The lineage is a DAG (joins create multiple parents), rendered as a tree.
+Multi-parent edges are shown as **link entries** — synthetic children that
+point to alternate parents, similar to `..` in Unix but named and multi-parent:
 
 ```
-├─▸ Joined Analysis
-│   ⤷ also uses: DNS Logs
+▸ Raw Flows
+  ├─▸ TCP Only
+  │   └─▸ Joined with DNS
+  │       ├── ⤴ DNS Logs         ← alt parent link (navigable)
+  │       ├─▸ Top Talkers
+  │       ...
+▸ DNS Logs
+  └── ⤴ → Joined with DNS       ← reverse link (who uses me)
 ```
+
+Link entries are:
+- Visually distinct (special glyph `⤴`, dimmed/italic color)
+- Navigable — Enter jumps to the referenced node
+- Show both directions: "I depend on X" (upward) and "X is used by Y" (reverse)
+- Not real children — synthetic, rendered-only
 
 ## Center Panel: Node Views
 
