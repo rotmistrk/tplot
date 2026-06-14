@@ -63,7 +63,30 @@ impl NodeId {
         self.segments.len() - 1
     }
 
-    /// Convert to filesystem-safe directory path (nested, 0-padded).
+    /// Resolve a dotted path to a filesystem path using names.toml at each level.
+    /// Named segments are looked up in the names.toml of their parent directory.
+    pub(crate) fn resolve(&self, nodes_root: &std::path::Path) -> Option<std::path::PathBuf> {
+        let mut current = nodes_root.to_path_buf();
+        for seg in &self.segments {
+            match seg {
+                Segment::Num(n) => {
+                    current.push(format!("{n:03}"));
+                }
+                Segment::Name(name) => {
+                    let names_file = current.join("names.toml");
+                    let mapping = read_names(&names_file)?;
+                    let num = mapping.get(name.as_str())?;
+                    current.push(format!("{num:03}"));
+                }
+            }
+            if !current.is_dir() {
+                return None;
+            }
+        }
+        Some(current)
+    }
+
+    /// Convert to filesystem path without name resolution (numeric segments only).
     pub(crate) fn to_dir_path(&self) -> String {
         self.segments
             .iter()
@@ -92,6 +115,35 @@ impl std::fmt::Display for NodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_dotted())
     }
+}
+
+/// Read names.toml: maps logical name → numeric index.
+fn read_names(path: &std::path::Path) -> Option<std::collections::HashMap<String, u32>> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let table: toml::Table = toml::from_str(&content).ok()?;
+    let mut map = std::collections::HashMap::new();
+    for (key, val) in table {
+        if let toml::Value::Integer(n) = val {
+            map.insert(key, n as u32);
+        }
+    }
+    Some(map)
+}
+
+/// Assign a logical name to a numeric node at the given parent directory.
+#[allow(dead_code)]
+pub(crate) fn assign_name(parent_dir: &std::path::Path, name: &str, num: u32) -> Result<(), String> {
+    let names_file = parent_dir.join("names.toml");
+    let mut table: toml::Table = if names_file.exists() {
+        let content = std::fs::read_to_string(&names_file).map_err(|e| e.to_string())?;
+        toml::from_str(&content).map_err(|e| e.to_string())?
+    } else {
+        toml::Table::new()
+    };
+    table.insert(name.to_string(), toml::Value::Integer(num as i64));
+    let out = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
+    std::fs::write(&names_file, out).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -130,5 +182,24 @@ mod tests {
         let grandchild = named.child(1);
         assert_eq!(grandchild.to_dotted(), "1.base.1");
         assert_eq!(grandchild.to_dir_path(), "001/base/001");
+    }
+
+    #[test]
+    fn test_name_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let nodes = dir.path();
+
+        // Create nodes/001/000/
+        std::fs::create_dir_all(nodes.join("001/000")).unwrap();
+
+        // Assign name "base" → 1 at root level
+        super::assign_name(nodes, "base", 1).unwrap();
+        // Assign name "tcp" → 0 inside 001/
+        super::assign_name(&nodes.join("001"), "tcp", 0).unwrap();
+
+        // Resolve "base.tcp" → nodes/001/000
+        let id = NodeId::parse("base.tcp");
+        let resolved = id.resolve(nodes).unwrap();
+        assert_eq!(resolved, nodes.join("001/000"));
     }
 }
