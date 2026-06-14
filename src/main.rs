@@ -1,6 +1,7 @@
 //! tplot — Terminal Data Analysis with Lineage Tracking
 
 mod app;
+mod engine;
 mod handler;
 mod slots;
 mod views;
