@@ -7,14 +7,18 @@ use serde::{Deserialize, Serialize};
 /// State of a node's materialized data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeState {
-    /// Data exists on disk, ready to query.
+    /// User is working here, commands logging to script.
+    Active,
+    /// Data exists and matches current script.
     Materialized,
+    /// Sealed. Edits auto-branch.
+    Frozen,
     /// Script inherited from variant, not yet run.
     Ghost,
+    /// Script edited, data doesn't match.
+    Stale,
     /// Computation in progress.
     Running,
-    /// Parent changed, data outdated.
-    Stale,
     /// Script execution failed.
     Error,
 }
@@ -37,13 +41,37 @@ pub(crate) struct NodeMeta {
     pub(crate) created: Option<String>,
     /// Last successful run timestamp.
     pub(crate) last_run: Option<String>,
-    /// Duration of last run in seconds.
-    pub(crate) run_duration_secs: Option<f64>,
-    /// Row count of materialized result.
-    pub(crate) row_count: Option<usize>,
     /// User comments.
     #[serde(default)]
     pub(crate) comments: String,
+    /// Size tracking.
+    #[serde(default)]
+    pub(crate) size: SizeInfo,
+    /// Timing tracking.
+    #[serde(default)]
+    pub(crate) timing: TimingInfo,
+}
+
+/// Disk size tracking for a node.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub(crate) struct SizeInfo {
+    /// Current node data size in bytes.
+    pub(crate) data_bytes: u64,
+    /// Cumulative descendants data size.
+    pub(crate) descendants_bytes: u64,
+    /// Historical peak size.
+    pub(crate) peak_bytes: u64,
+}
+
+/// Execution timing for a node.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub(crate) struct TimingInfo {
+    /// Last run duration in seconds.
+    pub(crate) last_run_secs: f64,
+    /// Total cumulative run time.
+    pub(crate) total_run_secs: f64,
+    /// Number of times the script has been executed.
+    pub(crate) run_count: u32,
 }
 
 #[allow(dead_code)]
@@ -55,12 +83,12 @@ impl NodeMeta {
             parent: None,
             also_depends: vec![],
             variant_of: None,
-            state: NodeState::Ghost,
+            state: NodeState::Active,
             created: Some(now_iso()),
             last_run: None,
-            run_duration_secs: None,
-            row_count: None,
             comments: String::new(),
+            size: SizeInfo::default(),
+            timing: TimingInfo::default(),
         }
     }
 
@@ -74,9 +102,9 @@ impl NodeMeta {
             state: NodeState::Ghost,
             created: Some(now_iso()),
             last_run: None,
-            run_duration_secs: None,
-            row_count: None,
             comments: String::new(),
+            size: SizeInfo::default(),
+            timing: TimingInfo::default(),
         }
     }
 
@@ -90,9 +118,9 @@ impl NodeMeta {
             state: NodeState::Ghost,
             created: Some(now_iso()),
             last_run: None,
-            run_duration_secs: None,
-            row_count: None,
             comments: String::new(),
+            size: SizeInfo::default(),
+            timing: TimingInfo::default(),
         }
     }
 }
@@ -212,7 +240,7 @@ mod tests {
         let node = Node::create(&nodes_dir, "raw-flows", meta).unwrap();
         assert_eq!(node.dir_name, "raw-flows");
         assert_eq!(node.meta.name, "Raw Flows");
-        assert_eq!(node.meta.state, NodeState::Ghost);
+        assert_eq!(node.meta.state, NodeState::Active);
         assert!(node.path.join("meta.toml").exists());
         assert!(node.path.join("views").exists());
         assert!(node.path.join("data").exists());
@@ -220,7 +248,7 @@ mod tests {
         // Reload
         let loaded = Node::load(&node.path).unwrap();
         assert_eq!(loaded.meta.name, "Raw Flows");
-        assert_eq!(loaded.meta.state, NodeState::Ghost);
+        assert_eq!(loaded.meta.state, NodeState::Active);
     }
 
     #[test]

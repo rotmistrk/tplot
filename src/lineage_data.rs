@@ -112,10 +112,12 @@ impl LineageData {
 
     fn state_icon(state: NodeState) -> &'static str {
         match state {
+            NodeState::Active => "▸",
             NodeState::Materialized => "▸",
+            NodeState::Frozen => "❄",
             NodeState::Ghost => "◇",
-            NodeState::Running => "⟳",
             NodeState::Stale => "⚠",
+            NodeState::Running => "⟳",
             NodeState::Error => "✗",
         }
     }
