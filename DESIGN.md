@@ -14,9 +14,6 @@ Exported 892 rows → root_attempts.csv
 
 tplot> derive by_hour {SELECT strftime(ts,'%H') as hour, count(*) as n FROM auth GROUP BY hour}
 Created node: by_hour (child of auth)
-
-tplot> freeze
-Node auth frozen. Future edits will create a branch.
 ```
 
 ## Layout
@@ -106,7 +103,7 @@ The lineage tree is a **tree-table** with toggleable columns:
 │   └─▸ High Ports  │ ✓  │   00:00:03.. │   2MB  │
 ```
 
-- Status: `✓` done, `>` running, `◇` ghost, `⚠` stale, `✗` error, `❄` frozen
+- Status: `✓` up-to-date, `>` running, `◇` empty, `⚠` dirty, `✗` error
 - Time: `hh:mm:ss..` = elapsed runtime, `..hh:mm:ss` = ETA (aligned on `:`)
 - Size: node data size (toggleable: node-only vs cumulative subtree)
 - User can show/hide columns
@@ -126,11 +123,11 @@ Statusbar for focused node: `[TCP Only] importing 1,234,567/2,300,000 rows (54%)
 
 | State | Icon | Meaning |
 |-------|------|---------|
-| Materialized | ▸ | Data exists, ready to query |
-| Ghost | ◇ | Script inherited from variant, not yet run |
+| Empty | ◇ | Script exists but never executed |
+| UpToDate | ▸ | Data matches current script + inputs |
+| Dirty | ▸⚠ | Upstream changed, needs re-run |
 | Running | ⟳ | Computation in progress |
-| Stale | ▸⚠ | Parent changed, data outdated |
-| Error | ✗ | Script failed |
+| Error | ✗ | Last run failed |
 
 ### DAG representation:
 
@@ -157,15 +154,15 @@ Link entries are:
 
 ## Center Panel: Node Views
 
-When you select a tree node, the center panel shows tabs:
+When you select a tree node, the center panel shows tabs based on `NodeResult`:
 
-| Tab | Content | Closeable |
-|-----|---------|-----------|
-| Script | The Tcl script that produces this node | No |
-| Card | Registration card (timestamps, logs, comments) | No |
-| History | Running log of REPL commands for this node | Yes |
-| Table (named) | Query results — one per `sql` or `into` | Yes |
-| Plot (named) | Chart output — one per `plot` command | Yes |
+| Tab | Content | Source | Closeable |
+|-----|---------|--------|-----------|
+| Script | The Tcl script that produces this node | Always present | No |
+| Card | Registration card (NodeMeta + notes) | Always present | No |
+| History | Running log of REPL commands for this node | On demand | Yes |
+| Table (named) | Query results from `NodeResult::Table` | Per `sql`/`into` | Yes |
+| Plot (named) | Chart output from `NodeResult::Plot` | Per `plot` command | Yes |
 
 ### Tab creation
 
@@ -185,33 +182,34 @@ When you select a tree node, the center panel shows tabs:
 
 ### Registration Card (Card tab)
 
-- Created timestamp
-- Last run timestamp + duration
-- Row count, column summary
+Displays `NodeMeta` fields plus user annotations:
+
+- Last run timestamp + duration (from `NodeMeta`)
+- Row count, data size (from `NodeMeta`)
+- Estimated run cost and output size (computed)
 - Execution log (stdout/stderr from the run)
 - User comments / notes (stored in `doc.md`, editable in-place)
 - Parent lineage (clickable path back to root)
-- Variant-of reference (if this is a branch)
+- Clone-of reference (if this is a variant)
 - Dependencies ("also uses: ...")
 
 ## Edit = Branch
 
-Editing a node's script always creates a sibling variant:
+Editing a node's script always creates a sibling variant (clone-on-edit):
 
 ```
 Before:  A → B → C, D
-After:   A → B  → C, D       (original preserved)
-         A → B' → C', D'     (variant, children are ghosts)
+After:   A → B  → C, D       (original preserved, UpToDate)
+         A → B' → C', D'     (variant, children are Empty)
 ```
 
-Ghost children inherit scripts but have no data until explicitly run.
-No data replication — ghosts cost nothing.
+Cloned children inherit scripts but have no data until explicitly run.
+No data replication — Empty nodes cost nothing.
 
-- **Edit** — creates variant (safe, non-destructive)
-- **Edit in-place** — marks children stale (with confirmation)
-- **Freeze** — seals node; any future edit auto-branches
+- **Edit** — creates variant via clone-on-edit (safe, non-destructive)
+- **Edit in-place** — marks children Dirty (with confirmation)
 - **Delete node** — removes entire subtree (data + scripts)
-- **Trim data** — removes data/ but keeps scripts (nodes become Ghost)
+- **Trim data** — removes data/ but keeps scripts (nodes become Empty)
 - **Compare** — diff two variants
 
 ## Data Engine: DuckDB
@@ -243,7 +241,6 @@ text that tplot structurizes into tables.
 | `corr <table> <col1> <col2>` | Correlation |
 | `node <name>` | Create/switch to node |
 | `run` | Re-execute current node's script |
-| `freeze` | Seal node (future edits auto-branch) |
 
 ### Structurization: `into` command
 
@@ -328,34 +325,89 @@ Each REPL command → appended to node's script.tcl
 Script is always re-runnable (reproduces the node's data)
 ```
 
-- `freeze` — seals the node. Any future edit auto-creates a branch.
 - `run` — re-executes the script, regenerates data.
-- Editing the script directly → marks node stale (needs re-run).
+- Editing the script directly → marks node Dirty (needs re-run).
 
 ## Node Lifecycle
 
-| State | Meaning |
-|-------|---------|
-| Active | User working here, commands logging to script |
-| Frozen | Sealed. Edits auto-branch (clone subtree, ghost data) |
-| Stale | Script edited, data doesn't match |
-| Materialized | Data exists and matches current script |
-| Ghost | Script inherited from branch, not yet run |
-| Error | Last run failed |
+### NodeBehavior Trait
 
-### Metadata: Size and Timing
+Every node type implements `NodeBehavior` — polymorphic, compile-time enforced:
 
-```toml
-[size]
-data_bytes = 45000000             # current node data
-descendants_bytes = 120000000     # cumulative subtree
-peak_bytes = 200000000            # historical max
-
-[timing]
-last_run_secs = 2.3
-total_run_secs = 14.7             # cumulative all runs
-run_count = 6
+```rust
+trait NodeBehavior {
+    fn name(&self) -> &str;
+    fn icon(&self) -> &str;
+    fn execute(&self, engine: &Engine) -> Result<NodeResult, String>;
+    fn command(&self) -> &str;
+    fn allows_children(&self) -> bool;
+}
 ```
+
+### NodeResult
+
+```rust
+enum NodeResult {
+    Table(QueryResult),
+    Plot(Vec<String>),
+    Nothing,
+}
+```
+
+### NodeStatus
+
+```rust
+enum NodeStatus {
+    Empty,           // never run
+    UpToDate,        // result matches inputs
+    Dirty,           // upstream changed
+    Running,
+    Error(String),
+}
+```
+
+| Status | Icon | Meaning |
+|--------|------|---------|
+| Empty | ◇ | Script exists but never executed |
+| UpToDate | ▸ | Data matches current script + inputs |
+| Dirty | ▸⚠ | Upstream changed, needs re-run |
+| Running | ⟳ | Computation in progress |
+| Error | ✗ | Last run failed |
+
+### Status Transitions
+
+```
+Empty → run → UpToDate
+UpToDate → upstream changed → Dirty
+Dirty → run → UpToDate
+Any → run → Running → UpToDate | Error
+UpToDate → edit → clone (new=Empty, original=UpToDate)
+```
+
+### NodeMeta
+
+Observed and computed metadata per node:
+
+```rust
+struct NodeMeta {
+    // Observed (from last execution)
+    data_bytes: u64,
+    row_count: u64,
+    last_run_duration: Duration,
+    last_run_at: Instant,
+    // Computed (from lineage + history)
+    estimated_bytes: u64,
+    estimated_run_cost: Duration,
+}
+```
+
+### NodeRegistry
+
+Relationships live in `NodeRegistry`, not on the node itself:
+
+- **Parents** — which nodes feed into this one (DAG edges)
+- **Children** — which nodes derive from this one
+- **Clone-on-edit** — variant tracking (original ↔ clone link)
 
 ## Syntax Highlighting
 
