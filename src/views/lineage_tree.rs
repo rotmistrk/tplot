@@ -25,10 +25,14 @@ impl LineageTreeView {
 }
 
 impl View for LineageTreeView {
-    delegate_view!(inner, override { title, cursor, handle });
+    delegate_view!(inner, override { title, cursor, handle, as_any_mut });
 
     fn title(&self) -> &str {
         "Lineage"
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn cursor(&self) -> Option<CursorRequest> {
