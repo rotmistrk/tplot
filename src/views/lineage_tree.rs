@@ -40,12 +40,12 @@ impl View for LineageTreeView {
     }
 
     fn handle(&mut self, event: &Event) -> HandleResult {
-        // Intercept Enter on leaf nodes to emit CM_NODE_SELECT.
+        // Intercept Enter to ALWAYS emit CM_NODE_SELECT (never expand/collapse).
         if let Event::Key(key) = event {
-            if key.code() == KeyCode::Enter || key.code() == KeyCode::Char(' ') {
+            if key.code() == KeyCode::Enter {
                 let cursor = self.inner.cursor();
                 let data = self.inner.data();
-                if cursor < data.visible_count() && !data.is_expandable(cursor) {
+                if cursor < data.visible_count() {
                     let name = data.label(cursor).to_string();
                     self.inner.state_mut().put_command(CM_NODE_SELECT, Some(Box::new(name)));
                     return HandleResult::Consumed;

@@ -42,23 +42,21 @@ fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
     let node = state.registry.nodes().iter().find(|n| n.name == node_name).cloned();
     let Some(node) = node else { return };
 
-    // Show command in REPL.
-    if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
-        repl.push_output(&format!("[{node_name}] {}", node.command));
-    }
-
-    // Re-run query and show result.
+    // For table nodes: show table contents. For query nodes: re-run the query.
     let cmd = &node.command;
-    if let Some(query) = cmd.strip_prefix("sql -name ") {
+    if cmd.contains("CREATE TABLE") || cmd.starts_with("into ") {
+        // It's a materialized table — just SELECT from it.
+        let sql = format!("SELECT * FROM \"{node_name}\" LIMIT 1000");
+        if let Ok(result) = state.engine().query(&sql) {
+            insert_table_tab(ctx.desktop_mut(), &node_name, result, cmd);
+        }
+    } else if let Some(query) = cmd.strip_prefix("sql -name ") {
         if let Some(start) = query.find('{') {
             let sql = &query[start + 1..query.len() - 1];
             if let Ok(result) = state.engine().query(sql) {
                 insert_table_tab(ctx.desktop_mut(), &node_name, result, sql);
             }
         }
-    } else if let Some(query) = cmd.strip_prefix("sql {") {
-        let sql = &query[..query.len() - 1];
-        let _ = state.engine().query(sql);
     }
 }
 
