@@ -59,7 +59,15 @@ fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
             }
         }
         crate::live_node::NodeKind::Plot => {
-            // TODO: show plot
+            // Re-run the plot command by parsing it.
+            // command format: "plot <type> <data_ref> <col1> <col2> ..."
+            let parts: Vec<&str> = node.command.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let plot_type = parts[1];
+                let data_ref = parts[2];
+                let options: Vec<String> = parts[3..].iter().map(|s| s.to_string()).collect();
+                let _ = handle_plot(state, ctx.desktop_mut(), plot_type, data_ref, &options);
+            }
         }
     }
 }
