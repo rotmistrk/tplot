@@ -53,7 +53,7 @@ fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
         if let Some(start) = query.find('{') {
             let sql = &query[start + 1..query.len() - 1];
             if let Ok(result) = state.engine().query(sql) {
-                insert_table_tab(ctx.desktop_mut(), &node_name, result);
+                insert_table_tab(ctx.desktop_mut(), &node_name, result, sql);
             }
         }
     } else if let Some(query) = cmd.strip_prefix("sql {") {
@@ -154,7 +154,7 @@ fn execute_command(
                 state
                     .registry
                     .add_query(&tab_name, &full_cmd, parent.as_deref(), Some(result.row_count as u64));
-                insert_table_tab(desktop, &tab_name, result);
+                insert_table_tab(desktop, &tab_name, result, &query);
             }
             Ok(msg)
         }
@@ -176,7 +176,7 @@ fn execute_command(
                 // Show preview.
                 let preview = state.engine().query(&format!("SELECT * FROM \"{table}\" LIMIT 100"));
                 if let Ok(data) = preview {
-                    insert_table_tab(desktop, &table, data);
+                    insert_table_tab(desktop, &table, data, &full_cmd);
                 }
                 Ok(format!("Imported {count} rows → {table}"))
             }
@@ -235,17 +235,24 @@ fn extract_create_table_name(sql: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-fn insert_table_tab(desktop: &mut dyn txv_core::prelude::View, name: &str, result: crate::engine::QueryResult) {
+fn insert_table_tab(
+    desktop: &mut dyn txv_core::prelude::View,
+    name: &str,
+    result: crate::engine::QueryResult,
+    command: &str,
+) {
     let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
         return;
     };
     let slot = SlotId::Center as usize;
-    // Remove existing tab with same name.
     #[allow(deprecated)]
     if let Some(panel) = ws.panel_mut(slot) {
         panel.close_tab_by_title(name);
     }
-    let view = TableView::new(name, result);
+    let mut view = TableView::new(name, result);
+    if !command.is_empty() {
+        view.set_command(command);
+    }
     ws.insert_tab(slot, name, Box::new(view));
 }
 

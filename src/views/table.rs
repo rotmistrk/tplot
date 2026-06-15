@@ -8,6 +8,7 @@ use crate::engine::QueryResult;
 pub(crate) struct TableView {
     state: ViewState,
     name: String,
+    command: String,
     columns: Vec<String>,
     rows: Vec<Vec<String>>,
     col_widths: Vec<u16>,
@@ -22,6 +23,7 @@ impl TableView {
         Self {
             state: ViewState::default(),
             name: name.to_string(),
+            command: String::new(),
             columns: result.columns,
             rows: result.rows,
             col_widths,
@@ -29,6 +31,11 @@ impl TableView {
             scroll_col: 0,
             cursor_row: 0,
         }
+    }
+
+    pub(crate) fn set_command(&mut self, cmd: &str) {
+        self.command = cmd.to_string();
+        self.state.mark_dirty();
     }
 
     /// Update with new query results.
@@ -124,18 +131,29 @@ impl View for TableView {
 
         let style = Style::default();
         let header_style = Style::new(txv_core::cell::Color::Ansi(14), txv_core::cell::Color::Reset);
+        let cmd_style = Style::new(txv_core::cell::Color::Ansi(245), txv_core::cell::Color::Reset);
         let cursor_style = Style::new(txv_core::cell::Color::Ansi(0), txv_core::cell::Color::Ansi(7));
 
-        // Draw header.
+        let mut y: usize = 0;
+
+        // Command line at top (dimmed).
+        if !self.command.is_empty() {
+            buf.print_line(0, y as u16, &self.command, w, cmd_style);
+            y += 1;
+        }
+
+        // Column header.
         let header = format_row(&self.columns, &self.col_widths, self.scroll_col);
-        buf.print_line(0, 0, &header, w, header_style);
+        buf.print_line(0, y as u16, &header, w, header_style);
+        y += 1;
 
         // Separator.
         let sep: String = "─".repeat(w as usize);
-        buf.print_line(0, 1, &sep, w, style);
+        buf.print_line(0, y as u16, &sep, w, style);
+        y += 1;
 
         // Data rows.
-        let visible = h.saturating_sub(2);
+        let visible = h.saturating_sub(y);
         for i in 0..visible {
             let row_idx = self.scroll_row + i;
             if row_idx >= self.rows.len() {
@@ -147,7 +165,7 @@ impl View for TableView {
             } else {
                 style
             };
-            buf.print_line(0, (i + 2) as u16, &line, w, s);
+            buf.print_line(0, (y + i) as u16, &line, w, s);
         }
     }
 
