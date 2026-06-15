@@ -50,6 +50,7 @@ The status bar is a single line below it — shows current node, progress, row c
 | Tab | Content |
 |-----|---------|
 | Lineage | The analysis DAG tree (primary navigation) |
+| Files | Configuration files (two roots: ~/.tplot/ and project) |
 | Library | Reusable recipes tree (built-in + user + project) |
 | Todo | Task tracking (analysis steps, findings, next actions) |
 
@@ -557,6 +558,80 @@ myproject/
 ### What's gitignored (ephemeral/large):
 - `nodes/*/data/` — materialized results (re-derivable from scripts)
 - `.tplot/` — UI state (personal preference)
+
+
+## Files Panel
+
+A left-panel tab for browsing and editing configuration files. Two roots:
+
+```
+[Lineage] [Files] [Library] [Todo]
+
+▸ ~ (home root: ~/.tplot/)
+  ├── init.tcl              global config, shared datasources
+  └── library/              global recipes
+▸ . (project root)
+  ├── init.tcl              project config, project datasources
+  ├── nodes/                lineage tree
+  └── library/              project recipes
+```
+
+- Enter on a file → opens in center panel editor (like kairn)
+- File operations: create, rename, copy, move, delete
+- Rusticle LSP support with tplot prelude (completions for tplot commands)
+
+## Data Sources
+
+Defined in `init.tcl` (global or project). Abstraction: driver + connection + auth.
+
+```tcl
+# ~/.tplot/init.tcl
+datasource prod_db {
+    driver psql
+    connection "host=prod.internal port=5432 dbname=analytics"
+    # auth: automatic from ~/.pgpass (standard PostgreSQL)
+}
+
+datasource logs_bucket {
+    driver s3
+    connection "s3://company-logs/prod/"
+    auth {exec aws sts get-session-token --output json}
+}
+
+datasource local {
+    driver file
+    connection "/var/log/"
+}
+```
+
+### Usage in commands
+
+```tcl
+into events [from prod_db {SELECT * FROM events WHERE ts > '2024-01-01'}]
+into logs [from logs_bucket "2024/01/*.parquet"]
+into syslog [from local "syslog"]
+```
+
+### Drivers
+
+| Driver | Backend | Auth mechanism |
+|--------|---------|----------------|
+| `psql` | DuckDB postgres_scanner (read-only) | `~/.pgpass` (standard) |
+| `s3` | DuckDB httpfs extension | exec script, AWS profile, env vars |
+| `file` | DuckDB read_csv/read_parquet | none |
+| `duckdb` | Attach another DuckDB file | none |
+
+### Auth
+
+| Method | How it works |
+|--------|-------------|
+| pgpass | Standard `~/.pgpass` lookup (host:port:db:user:password) |
+| exec | Run a script, parse output for credentials (e.g., `aws sts`) |
+| profile | AWS named profile from `~/.aws/credentials` |
+| env | Read from environment variables |
+
+Auth is pluggable — the `auth` block in datasource config specifies the method.
+Credentials are never stored in project files (gitignored or external).
 
 ## Non-Goals
 
