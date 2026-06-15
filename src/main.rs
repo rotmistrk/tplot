@@ -13,6 +13,7 @@ mod live_node;
 mod node;
 #[allow(dead_code)]
 mod node_id;
+mod plot;
 mod registry;
 #[allow(dead_code)]
 mod scripting;

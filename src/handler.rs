@@ -4,12 +4,14 @@ use txv_core::program::CommandContext;
 use txv_widgets::tiled_workspace::TiledWorkspace;
 
 use crate::app::AppState;
+use crate::plot::{self, Series};
 use crate::registry::NodeRegistry;
 use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
 use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
 use crate::views::help::HelpView;
 use crate::views::lineage_tree::{LineageTreeView, CM_NODE_SELECT};
+use crate::views::plot::PlotView;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT};
 use crate::views::table::TableView;
 
@@ -196,7 +198,11 @@ fn execute_command(
         }
         ScriptCommand::Freeze => Ok("Node frozen".into()),
         ScriptCommand::Run => Ok("Run: not yet implemented".into()),
-        ScriptCommand::Plot { .. } => Ok("Plot: not yet implemented".into()),
+        ScriptCommand::Plot {
+            plot_type,
+            data_ref,
+            options,
+        } => handle_plot(state, desktop, &plot_type, &data_ref, &options),
         ScriptCommand::Export { .. } => Ok("Export: not yet implemented".into()),
         ScriptCommand::Budget { .. } => Ok("Budget: not yet implemented".into()),
     }
@@ -226,6 +232,73 @@ fn refresh_lineage_tree(desktop: &mut dyn txv_core::prelude::View, registry: &No
 }
 
 /// Extract table name from "CREATE TABLE <name> AS ..." or "CREATE OR REPLACE TABLE <name> ...".
+fn handle_plot(
+    state: &mut AppState,
+    desktop: &mut dyn txv_core::prelude::View,
+    plot_type: &str,
+    data_ref: &str,
+    options: &[String],
+) -> Result<String, String> {
+    // Parse: data_ref is table name, options are column names (x, y1, y2...)
+    // If no columns specified, use first two columns of the table.
+    let x_col = options.first().map(|s| s.as_str());
+    let y_cols: Vec<&str> = options.iter().skip(1).map(|s| s.as_str()).collect();
+
+    // Query the data.
+    let sql = if let (Some(x), true) = (x_col, !y_cols.is_empty()) {
+        let y_list = y_cols.join(", ");
+        format!("SELECT \"{x}\", {y_list} FROM \"{data_ref}\" LIMIT 500")
+    } else {
+        format!("SELECT * FROM \"{data_ref}\" LIMIT 500")
+    };
+
+    let result = state.engine().query(&sql)?;
+    if result.columns.len() < 2 {
+        return Err("Need at least 2 columns (x + y)".into());
+    }
+
+    // Build series from result columns.
+    let x_labels: Vec<String> = result.rows.iter().map(|r| r[0].clone()).collect();
+    let mut all_series = Vec::new();
+
+    for col_idx in 1..result.columns.len() {
+        let values: Vec<(String, f64)> = x_labels
+            .iter()
+            .zip(result.rows.iter())
+            .map(|(lbl, row)| {
+                let val = row.get(col_idx).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                (lbl.clone(), val)
+            })
+            .collect();
+        all_series.push(Series {
+            label: result.columns[col_idx].clone(),
+            values,
+        });
+    }
+
+    // Render.
+    let lines = match plot_type {
+        "line" => plot::line_chart(&all_series, 80, 20),
+        _ => plot::bar_chart(&all_series, 80),
+    };
+
+    let cmd = format!("plot {plot_type} {data_ref} {}", options.join(" "));
+    let tab_name = format!("plot:{data_ref}");
+
+    // Insert plot tab.
+    let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
+        return Ok("plot rendered".into());
+    };
+    let slot = SlotId::Center as usize;
+    #[allow(deprecated)]
+    if let Some(panel) = ws.panel_mut(slot) {
+        panel.close_tab_by_title(&tab_name);
+    }
+    ws.insert_tab(slot, &tab_name, Box::new(PlotView::new(&tab_name, &cmd, lines)));
+
+    Ok(format!("plot:{data_ref}"))
+}
+
 fn extract_create_table_name(sql: &str) -> Option<String> {
     let upper = sql.to_uppercase();
     let table_pos = upper.find("TABLE ")?;
