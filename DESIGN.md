@@ -50,8 +50,7 @@ The status bar is a single line below it — shows current node, progress, row c
 | Tab | Content |
 |-----|---------|
 | Lineage | The analysis DAG tree (primary navigation) |
-| Files | Configuration files (two roots: ~/.tplot/ and project) |
-| Library | Reusable recipes tree (built-in + user + project) |
+| Files | Config + library + scripts (two roots: ~/.tplot/ and project) |
 | Todo | Task tracking (analysis steps, findings, next actions) |
 
 ### Tools Panel Tabs (right)
