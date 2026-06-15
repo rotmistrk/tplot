@@ -9,7 +9,7 @@ use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
 use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
 use crate::views::help::HelpView;
-use crate::views::lineage_tree::LineageTreeView;
+use crate::views::lineage_tree::{LineageTreeView, CM_NODE_SELECT};
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT};
 use crate::views::table::TableView;
 
@@ -17,6 +17,7 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     let cmd = ctx.command();
     match cmd {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
+        CM_NODE_SELECT => handle_node_select(ctx, state),
         CM_APP_QUIT => {
             ctx.sink().push_command(txv_core::commands::CM_QUIT, None);
         }
@@ -31,6 +32,31 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
             }
         }
         _ => {}
+    }
+}
+
+fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
+    // Extract node name from command data.
+    let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
+    let Some(node_name) = name else { return };
+
+    // Find the node in registry and re-run its query.
+    let node = state.registry.nodes().iter().find(|n| n.name == node_name).cloned();
+    let Some(node) = node else { return };
+
+    // Try to execute the node's command as a SQL query.
+    let cmd = &node.command;
+    if let Some(query) = cmd.strip_prefix("sql -name ") {
+        // Extract the query part after the name: "name {QUERY}"
+        if let Some(start) = query.find('{') {
+            let sql = &query[start + 1..query.len() - 1];
+            if let Ok(result) = state.engine().query(sql) {
+                insert_table_tab(ctx.desktop_mut(), &node_name, result);
+            }
+        }
+    } else if let Some(query) = cmd.strip_prefix("sql {") {
+        let sql = &query[..query.len() - 1];
+        let _ = state.engine().query(sql);
     }
 }
 

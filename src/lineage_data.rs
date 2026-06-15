@@ -139,21 +139,19 @@ impl TreeTableSource for LineageData {
     }
 
     fn column_count(&self) -> usize {
-        2 // kind icon + rows
+        1
     }
 
     fn cell(&self, row: usize, col: usize) -> &str {
-        // We can't return dynamic strings from &str easily.
-        // Use a simple static approach for icons.
+        if col != 0 {
+            return "";
+        }
         let entry = &self.entries[self.visible[row]];
         let node = &self.nodes[entry.node_idx];
-        match col {
-            0 => match node.kind {
-                NodeKind::Table => "💾",
-                NodeKind::Query => "📋",
-                NodeKind::Plot => "📊",
-            },
-            _ => "",
+        match node.kind {
+            NodeKind::Table => "[T]",
+            NodeKind::Query => "[Q]",
+            NodeKind::Plot => "[P]",
         }
     }
 }
