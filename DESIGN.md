@@ -607,10 +607,13 @@ datasource local {
 ### Usage in commands
 
 ```tcl
-into events [from prod_db {SELECT * FROM events WHERE ts > '2024-01-01'}]
-into logs [from logs_bucket "2024/01/*.parquet"]
-into syslog [from local "syslog"]
+into events -source prod_db {SELECT * FROM events WHERE ts > '2024-01-01'}
+into logs -source logs_bucket "2024/01/*.parquet"
+into cw_errors -source cloudwatch {filter @message like /ERROR/ | stats count(*) by bin(5m)}
+into syslog -file /var/log/syslog -regex {^(\S+).*} -cols {ts msg}
 ```
+
+`into` is the ONLY command that talks to external drivers. Everything else is DuckDB-local.
 
 ### Drivers
 
@@ -635,6 +638,109 @@ into syslog [from local "syslog"]
 
 Auth is pluggable — the `auth` block in datasource config specifies the method.
 Credentials are never stored in project files (gitignored or external).
+
+
+## Scenario Examples
+
+### 1. Incident Investigation
+
+```tcl
+# Pull CloudWatch logs around incident
+into logs -source cloudwatch {
+    filter @logGroup = '/app/prod'
+    | filter @timestamp > '2024-01-15 14:00'
+    | filter @timestamp < '2024-01-15 15:00'
+}
+sql -name errors {SELECT * FROM logs WHERE message LIKE '%ERROR%'}
+sql -name by_minute {SELECT date_trunc('minute', ts) as min, count(*) as cnt FROM errors GROUP BY 1 ORDER BY 1}
+plot line by_minute min cnt
+sql -name top_msgs {SELECT message, count(*) as n FROM errors GROUP BY 1 ORDER BY n DESC LIMIT 10}
+plot bar top_msgs message n
+```
+
+### 2. Performance Baseline
+
+```tcl
+into queries -source redshift {
+    SELECT query_id, start_time, elapsed/1e6 as secs, rows_affected
+    FROM stl_query WHERE start_time > dateadd(day, -7, getdate())
+}
+sql -name latency {SELECT date_trunc('hour', start_time) as hour, 
+    percentile_cont(0.50) WITHIN GROUP (ORDER BY secs) as p50,
+    percentile_cont(0.95) WITHIN GROUP (ORDER BY secs) as p95,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY secs) as p99
+    FROM queries GROUP BY 1 ORDER BY 1}
+plot line latency hour p50 p95 p99
+```
+
+### 3. Network Security (local logs)
+
+```tcl
+into ufw -file /var/log/ufw.log -regex {SRC=([0-9.]+).*DPT=([0-9]+).*PROTO=(\w+)} -cols {src_ip dst_port proto}
+sql -name top_attackers {SELECT src_ip, count(*) as hits FROM ufw GROUP BY 1 ORDER BY 2 DESC LIMIT 15}
+plot bar top_attackers src_ip hits
+sql -name hourly {SELECT substr(ts, 12, 2) as hour, count(*) FROM ufw GROUP BY 1 ORDER BY 1}
+plot line hourly hour count
+```
+
+### 4. Script = Tree Template
+
+A script, when run top-to-bottom, produces the lineage tree:
+
+```tcl
+# Running this script produces:
+#   [T] events
+#   ├── [Q] by_hour
+#   │   └── [P] plot:by_hour
+#   └── [Q] errors
+#       └── [Q] top_errors
+
+into events -source prod_db {SELECT * FROM events WHERE ts > '2024-01-01'}
+sql -name by_hour {SELECT date_trunc('hour', ts) as hour, count(*) FROM events GROUP BY 1}
+plot line by_hour hour count
+sql -name errors {SELECT * FROM events WHERE level = 'ERROR'}
+sql -name top_errors {SELECT message, count(*) as n FROM errors GROUP BY 1 ORDER BY n DESC LIMIT 20}
+```
+
+Delete all data, re-run the script → same tree reconstructed.
+
+## MVP
+
+The MVP is small: a convenient interactive shell for data exploration with visual feedback.
+
+### MVP Scope (what ships first)
+
+| Feature | Status |
+|---------|--------|
+| REPL with history, paste, completion hints | ✓ basic, needs completion |
+| `into -file` (local CSV/Parquet) | ✓ |
+| `sql` with named results | ✓ |
+| `plot bar/line` (text-based) | ✓ |
+| Lineage tree (live, shows nodes) | ✓ |
+| Enter on node → shows content | ✓ |
+| Node persistence (node.tcl on disk) | ✓ |
+| Help (F1) | ✓ |
+| Export `-csv -name` | ○ |
+| Progress bar + cancel for long ops | ○ |
+| Step-by-step execution (breakpoints) | ○ |
+| `into -source` (external drivers) | ○ |
+
+### MVP Focus (where the time goes)
+
+1. **Typing convenience** — tab completion (tables, columns, commands), fuzzy history
+2. **Flow control** — run-all, step-by-step, stop-before-expensive, resume
+3. **Progress + cancel** — visual progress in tree + statusbar, Ctrl+C cancels
+4. **Graph styling** — titles, axis labels, colors, multi-series legend
+5. **Export** — tables to CSV/Parquet, plots to PNG/SVG (via gnuplot when available)
+
+### Post-MVP
+
+- External drivers (psql, redshift, s3, cloudwatch, athena)
+- Gnuplot integration (high-quality plots)
+- MCP server for Kiro
+- Clone-on-edit branching
+- Session persistence (tabs survive restart)
+- Syntax highlighting with sub-language zones
 
 ## Non-Goals
 
