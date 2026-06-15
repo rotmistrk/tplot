@@ -65,6 +65,16 @@ impl NodeRegistry {
         self.nodes.push(node);
     }
 
+    /// Register a plot node.
+    pub(crate) fn add_plot(&mut self, name: &str, command: &str, parent: Option<&str>) {
+        if self.nodes.iter().any(|n| n.name == name) {
+            return;
+        }
+        let node = LiveNode::new(name, NodeKind::Plot, parent, command);
+        self.persist_node_child(&node);
+        self.nodes.push(node);
+    }
+
     fn persist_node_root(&mut self, node: &LiveNode) {
         let seg = format!("{:03}", self.next_root);
         self.next_root += 1;

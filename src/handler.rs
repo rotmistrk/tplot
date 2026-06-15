@@ -239,12 +239,9 @@ fn handle_plot(
     data_ref: &str,
     options: &[String],
 ) -> Result<String, String> {
-    // Parse: data_ref is table name, options are column names (x, y1, y2...)
-    // If no columns specified, use first two columns of the table.
     let x_col = options.first().map(|s| s.as_str());
     let y_cols: Vec<&str> = options.iter().skip(1).map(|s| s.as_str()).collect();
 
-    // Query the data.
     let sql = if let (Some(x), true) = (x_col, !y_cols.is_empty()) {
         let y_list = y_cols.join(", ");
         format!("SELECT \"{x}\", {y_list} FROM \"{data_ref}\" LIMIT 500")
@@ -252,15 +249,28 @@ fn handle_plot(
         format!("SELECT * FROM \"{data_ref}\" LIMIT 500")
     };
 
-    let result = state.engine().query(&sql)?;
+    // Try DuckDB table/view first, fallback to re-running node's stored query.
+    let result = match state.engine().query(&sql) {
+        Ok(r) => r,
+        Err(_) => {
+            let node = state.registry.nodes().iter().find(|n| n.name == data_ref).cloned();
+            let Some(node) = node else {
+                return Err(format!("No table or node named '{data_ref}'"));
+            };
+            let q = node.query();
+            if q.is_empty() {
+                return Err(format!("Node '{data_ref}' has no query"));
+            }
+            state.engine().query(q)?
+        }
+    };
+
     if result.columns.len() < 2 {
         return Err("Need at least 2 columns (x + y)".into());
     }
 
-    // Build series from result columns.
     let x_labels: Vec<String> = result.rows.iter().map(|r| r[0].clone()).collect();
     let mut all_series = Vec::new();
-
     for col_idx in 1..result.columns.len() {
         let values: Vec<(String, f64)> = x_labels
             .iter()
@@ -276,7 +286,6 @@ fn handle_plot(
         });
     }
 
-    // Render.
     let lines = match plot_type {
         "line" => plot::line_chart(&all_series, 80, 20),
         _ => plot::bar_chart(&all_series, 80),
@@ -285,9 +294,11 @@ fn handle_plot(
     let cmd = format!("plot {plot_type} {data_ref} {}", options.join(" "));
     let tab_name = format!("plot:{data_ref}");
 
-    // Insert plot tab.
+    // Register plot in lineage tree.
+    state.registry.add_plot(&tab_name, &cmd, Some(data_ref));
+
     let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
-        return Ok("plot rendered".into());
+        return Ok(tab_name);
     };
     let slot = SlotId::Center as usize;
     #[allow(deprecated)]
@@ -295,8 +306,7 @@ fn handle_plot(
         panel.close_tab_by_title(&tab_name);
     }
     ws.insert_tab(slot, &tab_name, Box::new(PlotView::new(&tab_name, &cmd, lines)));
-
-    Ok(format!("plot:{data_ref}"))
+    Ok(tab_name)
 }
 
 fn extract_create_table_name(sql: &str) -> Option<String> {
