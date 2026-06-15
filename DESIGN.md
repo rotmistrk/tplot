@@ -617,7 +617,10 @@ into syslog [from local "syslog"]
 | Driver | Backend | Auth mechanism |
 |--------|---------|----------------|
 | `psql` | DuckDB postgres_scanner (read-only) | `~/.pgpass` (standard) |
+| `redshift` | DuckDB postgres_scanner (Redshift dialect) | `~/.pgpass` or exec (IAM token) |
+| `athena` | DuckDB via JDBC or AWS SDK query execution | AWS profile, exec, env |
 | `s3` | DuckDB httpfs extension | exec script, AWS profile, env vars |
+| `cloudwatch` | AWS CloudWatch Logs Insights queries | AWS profile, exec, env |
 | `file` | DuckDB read_csv/read_parquet | none |
 | `duckdb` | Attach another DuckDB file | none |
 
