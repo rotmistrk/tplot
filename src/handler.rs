@@ -36,18 +36,20 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
 }
 
 fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
-    // Extract node name from command data.
     let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
     let Some(node_name) = name else { return };
 
-    // Find the node in registry and re-run its query.
     let node = state.registry.nodes().iter().find(|n| n.name == node_name).cloned();
     let Some(node) = node else { return };
 
-    // Try to execute the node's command as a SQL query.
+    // Show command in REPL.
+    if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
+        repl.push_output(&format!("[{node_name}] {}", node.command));
+    }
+
+    // Re-run query and show result.
     let cmd = &node.command;
     if let Some(query) = cmd.strip_prefix("sql -name ") {
-        // Extract the query part after the name: "name {QUERY}"
         if let Some(start) = query.find('{') {
             let sql = &query[start + 1..query.len() - 1];
             if let Ok(result) = state.engine().query(sql) {
