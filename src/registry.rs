@@ -42,15 +42,24 @@ impl NodeRegistry {
         self.nodes.push(node);
     }
 
-    /// Register a query (from `sql`). Parent detected from FROM clause.
-    pub(crate) fn add_query(&mut self, name: &str, command: &str, parent: Option<&str>, row_count: Option<u64>) {
+    /// Register a query (from `sql`). Stores the raw SQL for re-execution.
+    pub(crate) fn add_query(
+        &mut self,
+        name: &str,
+        command: &str,
+        query_sql: &str,
+        parent: Option<&str>,
+        row_count: Option<u64>,
+    ) {
         if let Some(existing) = self.nodes.iter_mut().find(|n| n.name == name) {
             existing.command = command.to_string();
+            existing.query_text = query_sql.to_string();
             existing.row_count = row_count;
             existing.last_run = Some(std::time::SystemTime::now());
             return;
         }
         let mut node = LiveNode::new(name, NodeKind::Query, parent, command);
+        node.set_query(query_sql);
         node.row_count = row_count;
         self.persist_node_child(&node);
         self.nodes.push(node);
@@ -134,7 +143,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut reg = NodeRegistry::new(dir.path());
         reg.add_table("auth", "into auth -file x.csv", Some(100));
-        reg.add_query("by_user", "sql {SELECT ...}", Some("auth"), Some(3));
+        reg.add_query(
+            "by_user",
+            "sql {SELECT ...}",
+            "SELECT username FROM auth",
+            Some("auth"),
+            Some(3),
+        );
 
         assert_eq!(reg.nodes().len(), 2);
         assert_eq!(reg.nodes()[0].name, "auth");

@@ -22,6 +22,7 @@ pub(crate) struct LiveNode {
     pub(crate) kind: NodeKind,
     pub(crate) parent: Option<String>,
     pub(crate) command: String,
+    pub(crate) query_text: String,
     pub(crate) created: SystemTime,
     pub(crate) last_run: Option<SystemTime>,
     pub(crate) run_secs: Option<f64>,
@@ -41,7 +42,18 @@ impl LiveNode {
             run_secs: None,
             row_count: None,
             note: String::new(),
+            query_text: String::new(),
         }
+    }
+
+    /// The executable SQL query for this node (extracted at creation time).
+    pub(crate) fn query(&self) -> &str {
+        &self.query_text
+    }
+
+    /// Set the query text explicitly.
+    pub(crate) fn set_query(&mut self, q: &str) {
+        self.query_text = q.to_string();
     }
 
     /// Serialize to node.tcl content.

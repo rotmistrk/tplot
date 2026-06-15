@@ -42,20 +42,22 @@ fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
     let node = state.registry.nodes().iter().find(|n| n.name == node_name).cloned();
     let Some(node) = node else { return };
 
-    // For table nodes: show table contents. For query nodes: re-run the query.
-    let cmd = &node.command;
-    if cmd.contains("CREATE TABLE") || cmd.starts_with("into ") {
-        // It's a materialized table — just SELECT from it.
-        let sql = format!("SELECT * FROM \"{node_name}\" LIMIT 1000");
-        if let Ok(result) = state.engine().query(&sql) {
-            insert_table_tab(ctx.desktop_mut(), &node_name, result, cmd);
-        }
-    } else if let Some(query) = cmd.strip_prefix("sql -name ") {
-        if let Some(start) = query.find('{') {
-            let sql = &query[start + 1..query.len() - 1];
-            if let Ok(result) = state.engine().query(sql) {
-                insert_table_tab(ctx.desktop_mut(), &node_name, result, sql);
+    match node.kind {
+        crate::live_node::NodeKind::Table => {
+            // Materialized table — show its contents.
+            let sql = format!("SELECT * FROM \"{node_name}\" LIMIT 1000");
+            if let Ok(result) = state.engine().query(&sql) {
+                insert_table_tab(ctx.desktop_mut(), &node_name, result, &node.command);
             }
+        }
+        crate::live_node::NodeKind::Query => {
+            // Re-run the stored query.
+            if let Ok(result) = state.engine().query(node.query()) {
+                insert_table_tab(ctx.desktop_mut(), &node_name, result, &node.command);
+            }
+        }
+        crate::live_node::NodeKind::Plot => {
+            // TODO: show plot
         }
     }
 }
@@ -149,9 +151,13 @@ fn execute_command(
             } else {
                 let parent = crate::registry::detect_parent_table(&query);
                 let full_cmd = format!("sql -name {tab_name} {{{query}}}");
-                state
-                    .registry
-                    .add_query(&tab_name, &full_cmd, parent.as_deref(), Some(result.row_count as u64));
+                state.registry.add_query(
+                    &tab_name,
+                    &full_cmd,
+                    &query,
+                    parent.as_deref(),
+                    Some(result.row_count as u64),
+                );
                 insert_table_tab(desktop, &tab_name, result, &query);
             }
             Ok(msg)
@@ -183,7 +189,9 @@ fn execute_command(
         ScriptCommand::Derive { name, sql } => {
             let parent = crate::registry::detect_parent_table(&sql);
             let full_cmd = format!("derive {name} {{{sql}}}");
-            state.registry.add_query(&name, &full_cmd, parent.as_deref(), None);
+            state
+                .registry
+                .add_query(&name, &full_cmd, &sql, parent.as_deref(), None);
             Ok(format!("Created node: {name}"))
         }
         ScriptCommand::Freeze => Ok("Node frozen".into()),
