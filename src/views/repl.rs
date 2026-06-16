@@ -170,16 +170,18 @@ impl ReplView {
     fn handle_key_event(&mut self, key: txv_core::event::KeyEvent) -> HandleResult {
         let code = key.code();
 
-        // When dropdown is visible, the DropdownMenu handles keys directly.
-        // We just need to dismiss on non-navigation keys that reach us.
+        // When sidekick is visible, let navigation keys pass through to the dropdown.
         if self.sidekick_visible {
             match code {
+                KeyCode::Up | KeyCode::Down | KeyCode::Enter => {
+                    return HandleResult::Ignored;
+                }
                 KeyCode::Esc => {
                     self.dismiss_completion();
                     return HandleResult::Consumed;
                 }
                 _ => {
-                    // Typing dismisses dropdown, char handled below.
+                    // Any typing dismisses the dropdown.
                     self.dismiss_completion();
                 }
             }
