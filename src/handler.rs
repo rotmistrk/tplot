@@ -178,15 +178,15 @@ fn execute_command(
         ScriptCommand::Sql { query, var_name } => {
             let result = state.engine().query(&query)?;
             let msg = format!("{} rows, {} cols", result.row_count, result.columns.len());
-            let tab_name = var_name.unwrap_or_else(|| "result".to_string());
 
             let upper = query.trim().to_uppercase();
             if upper.starts_with("CREATE") {
-                let table_name = sql_analysis::extract_created_table(&query).unwrap_or_else(|| tab_name.clone());
+                let table_name = sql_analysis::extract_created_table(&query).unwrap_or_else(|| "result".to_string());
                 state
                     .registry
                     .add_table(&table_name, &format!("sql {{{query}}}"), &query, None);
-            } else {
+            } else if let Some(tab_name) = var_name {
+                // Named query: register node + create view.
                 let parent = sql_analysis::detect_parent_table(&query);
                 let full_cmd = format!("sql -name {tab_name} {{{query}}}");
                 state.registry.add_query(
@@ -196,11 +196,13 @@ fn execute_command(
                     parent.as_deref(),
                     Some(result.row_count as u64),
                 );
-                // Create a DuckDB view so downstream commands can reference by name.
                 let _ = state
                     .engine()
                     .query(&format!("CREATE OR REPLACE VIEW \"{tab_name}\" AS {query}"));
                 insert_table_tab(desktop, &tab_name, result, &query);
+            } else {
+                // Unnamed: just show results, no node, no view.
+                insert_table_tab(desktop, "result", result, &query);
             }
             Ok(msg)
         }
