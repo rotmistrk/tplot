@@ -48,7 +48,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let root_dir = fs::canonicalize(&cli.path)?;
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .target(env_logger::Target::Pipe(Box::new(
+            std::fs::File::create(root_dir.join(".tplot.log"))
+                .unwrap_or_else(|_| std::fs::File::create("/tmp/tplot.log").expect("log file")),
+        )))
+        .init();
 
     let ws = build_workspace(&root_dir);
     let status = build_status_bar(&ws);

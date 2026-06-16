@@ -152,6 +152,9 @@ impl Registry {
     fn persist(&self, node: &Node) {
         if let Some(ref dir) = self.nodes_dir {
             save_node(dir, node);
+            log::info!("persisted node '{}' to {}", node.name, dir.display());
+        } else {
+            log::warn!("cannot persist node '{}': no nodes_dir", node.name);
         }
     }
 }

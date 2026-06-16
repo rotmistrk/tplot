@@ -17,11 +17,12 @@ pub(crate) struct AppState {
 impl AppState {
     pub(crate) fn new(root_dir: PathBuf) -> Self {
         let engine = Engine::open(&root_dir).unwrap_or_else(|e| {
-            log::error!("Failed to open DuckDB: {e}, using in-memory");
+            log::error!("DuckDB open failed at {}: {e} — using in-memory", root_dir.display());
             Engine::open_memory().expect("in-memory DB")
         });
         let scripting = ScriptEngine::new();
         let registry = Registry::open(&root_dir);
+        log::info!("tplot: root={}, nodes={}", root_dir.display(), registry.nodes().len());
         Self {
             root_dir,
             engine,

@@ -4,7 +4,7 @@ use txv_core::event::{CommandId, KeyCode, KeyEvent, KeyMod};
 use txv_core::status_bar::{StatusBar, StatusSlot};
 use txv_widgets::tiled_workspace::commands::{CM_TW_FOCUS_PANEL, CM_TW_LAYOUT_CYCLE, CM_TW_TAB_CLOSE, CM_TW_ZOOM};
 use txv_widgets::tiled_workspace::TiledWorkspace;
-use txv_widgets::KeyLabelView;
+use txv_widgets::{KeyLabelView, MessageView};
 
 /// Application command IDs.
 pub(crate) const CM_APP_QUIT: CommandId = 800;
@@ -20,6 +20,9 @@ pub(crate) fn build_status_bar(desktop: &TiledWorkspace) -> StatusBar {
 
     // Visible app bindings.
     add_visible_bindings(&mut bar);
+
+    // Message display (shows info/warn/error with timeout).
+    bar.add(StatusSlot::new(Box::new(MessageView::new(5))).priority(8).stretch(1));
 
     // Hidden panel focus bindings.
     add_panel_focus(&mut bar);

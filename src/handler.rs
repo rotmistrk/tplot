@@ -2,6 +2,7 @@
 
 use txv_core::program::CommandContext;
 use txv_widgets::tiled_workspace::TiledWorkspace;
+use txv_widgets::CM_STATUS_MESSAGE;
 
 use crate::app::AppState;
 use crate::node_behavior::NodeResult;
@@ -19,6 +20,10 @@ use crate::views::table::TableView;
 /// Refresh lineage tree on startup (called from main before event loop).
 pub(crate) fn initial_refresh(desktop: &mut dyn txv_core::prelude::View, registry: &registry::Registry) {
     refresh_lineage_tree(desktop, registry);
+    let count = registry.nodes().len();
+    if count > 0 {
+        log::info!("Loaded {count} nodes from disk");
+    }
 }
 
 pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
@@ -72,6 +77,19 @@ fn handle_repl_tab(ctx: &mut CommandContext, state: &mut AppState) {
     }
 }
 
+/// Push a status bar message (visible to user as popup).
+fn status_msg(ctx: &CommandContext, text: &str) {
+    use txv_core::message::{Message, MsgLevel};
+    let msg = Message::new(MsgLevel::Info, "tplot", text.to_string());
+    ctx.sink().push_command(CM_STATUS_MESSAGE, Some(Box::new(msg)));
+}
+
+fn status_err(ctx: &CommandContext, text: &str) {
+    use txv_core::message::{Message, MsgLevel};
+    let msg = Message::new(MsgLevel::Error, "tplot", text.to_string());
+    ctx.sink().push_command(CM_STATUS_MESSAGE, Some(Box::new(msg)));
+}
+
 fn common_prefix(strings: &[&str]) -> String {
     if strings.is_empty() {
         return String::new();
@@ -108,8 +126,11 @@ fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
         Ok(NodeResult::Plot(lines)) => {
             insert_plot_tab(ctx.desktop_mut(), &node_name, &command, lines);
         }
-        Ok(NodeResult::Nothing) => {}
+        Ok(NodeResult::Nothing) => {
+            status_msg(ctx, &format!("Node '{node_name}' executed (no output)"));
+        }
         Err(e) => {
+            status_err(ctx, &e);
             if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
                 repl.push_error(&e);
             }
@@ -182,6 +203,7 @@ fn execute_command(
             let upper = query.trim().to_uppercase();
             if upper.starts_with("CREATE") {
                 let table_name = sql_analysis::extract_created_table(&query).unwrap_or_else(|| "result".to_string());
+                log::info!("CREATE detected, table_name='{table_name}'");
                 state
                     .registry
                     .add_table(&table_name, &format!("sql {{{query}}}"), &query, None);
