@@ -109,7 +109,10 @@ impl ReplView {
             .with_filter(FilterMode::Prefix);
         let h = (count.min(10) as u16) + 2;
         let w = (max_w as u16 + 4).clamp(14, 50);
-        let rect = txv_core::prelude::Rect::new(0, 0, w, h);
+        // Position: cursor x in prompt, above the prompt line.
+        let prompt_y = self.state.bounds().h().saturating_sub(1);
+        let cursor_x = (self.cursor as u16) + 7; // "tplot> " = 7
+        let rect = txv_core::prelude::Rect::new(cursor_x, prompt_y.saturating_sub(h), w, h);
         let data = SidekickRequest::new(Box::new(menu), rect, self.state.id());
         self.state.put_command(CM_SIDEKICK_SHOW, Some(Box::new(data)));
         self.sidekick_visible = true;
