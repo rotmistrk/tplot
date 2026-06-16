@@ -10,6 +10,7 @@ pub(crate) enum NodeResult {
     /// Rendered plot lines (text-based chart).
     Plot(Vec<String>),
     /// No displayable output (e.g., CREATE TABLE side effect).
+    #[allow(dead_code)]
     Nothing,
 }
 
@@ -25,6 +26,7 @@ pub(crate) trait NodeBehavior: Send + Sync {
     fn command(&self) -> &str;
 
     /// Can this node have children derived from it?
+    #[allow(dead_code)]
     fn allows_children(&self) -> bool {
         true
     }
