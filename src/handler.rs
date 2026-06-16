@@ -1,6 +1,7 @@
 //! Command handler — dispatches commands from the TUI event loop.
 
 use txv_core::program::CommandContext;
+use txv_widgets::sidekick::CM_SIDEKICK_RESULT;
 use txv_widgets::tiled_workspace::TiledWorkspace;
 use txv_widgets::CM_STATUS_MESSAGE;
 
@@ -31,6 +32,16 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
         CM_REPL_TAB => handle_repl_tab(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
+        CM_SIDEKICK_RESULT => {
+            // User picked from dropdown — apply completion.
+            if let Some(text) = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()) {
+                let text = text.clone();
+                if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
+                    repl.apply_completion(&text);
+                    repl.sidekick_visible = false;
+                }
+            }
+        }
         CM_APP_QUIT => {
             ctx.sink().push_command(txv_core::commands::CM_QUIT, None);
         }
@@ -56,13 +67,11 @@ fn handle_repl_tab(ctx: &mut CommandContext, state: &mut AppState) {
     };
     let completions = crate::completions::complete(&input, state.engine(), &state.registry);
     if completions.len() == 1 {
-        // Single match — apply directly.
         let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
             return;
         };
         repl.apply_completion(&completions[0].text);
     } else if completions.len() > 1 {
-        // Multiple matches — show them as output, apply common prefix.
         let texts: Vec<&str> = completions.iter().map(|c| c.text.as_str()).collect();
         let prefix = common_prefix(&texts);
         let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
@@ -70,10 +79,10 @@ fn handle_repl_tab(ctx: &mut CommandContext, state: &mut AppState) {
         };
         if prefix.len() > input.split_whitespace().last().map_or(0, |w| w.len()) {
             repl.apply_completion(&prefix);
-        } else {
-            let list = texts.join("  ");
-            repl.push_output(&list);
         }
+        // Show dropdown with all options.
+        let items: Vec<String> = completions.iter().map(|c| c.text.clone()).collect();
+        repl.show_completion_dropdown(items);
     }
 }
 

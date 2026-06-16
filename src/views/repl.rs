@@ -18,6 +18,7 @@ pub(crate) struct ReplView {
     history: Vec<String>,
     hist_pos: Option<usize>,
     scroll: usize,
+    pub(crate) sidekick_visible: bool,
 }
 
 #[derive(Clone)]
@@ -38,6 +39,7 @@ impl ReplView {
             history: Vec::new(),
             hist_pos: None,
             scroll: 0,
+            sidekick_visible: false,
         }
     }
 
@@ -86,6 +88,41 @@ impl ReplView {
         self.input.replace_range(word_start..self.cursor, text);
         self.cursor = word_start + text.len();
         self.state.mark_dirty();
+    }
+
+    /// Get view ID for sidekick positioning.
+    #[allow(dead_code)]
+    pub(crate) fn view_id(&self) -> txv_core::prelude::ViewId {
+        self.state.id()
+    }
+
+    /// Show a completion dropdown.
+    pub(crate) fn show_completion_dropdown(&mut self, items: Vec<String>) {
+        use txv_widgets::dropdown_menu::{DropdownMenu, FilterMode, NumberMode};
+        use txv_widgets::sidekick::{SidekickRequest, CM_SIDEKICK_SHOW};
+
+        let count = items.len();
+        let max_w = items.iter().map(|s| s.len()).max().unwrap_or(10);
+        let source = crate::completion_source::CompletionListSource::new(items);
+        let menu = DropdownMenu::new(source)
+            .with_numbers(NumberMode::None)
+            .with_filter(FilterMode::Prefix);
+        let h = (count.min(10) as u16) + 2;
+        let w = (max_w as u16 + 4).clamp(14, 50);
+        let rect = txv_core::prelude::Rect::new(0, 0, w, h);
+        let data = SidekickRequest::new(Box::new(menu), rect, self.state.id());
+        self.state.put_command(CM_SIDEKICK_SHOW, Some(Box::new(data)));
+        self.sidekick_visible = true;
+    }
+
+    /// Hide the completion dropdown.
+    #[allow(dead_code)]
+    pub(crate) fn hide_completion(&mut self) {
+        if self.sidekick_visible {
+            use txv_widgets::sidekick::CM_SIDEKICK_HIDE;
+            self.sidekick_visible = false;
+            self.state.put_command(CM_SIDEKICK_HIDE, None);
+        }
     }
 
     fn auto_scroll(&mut self) {

@@ -1,6 +1,7 @@
 //! tplot — Terminal Data Analysis with Lineage Tracking
 
 mod app;
+mod completion_source;
 #[allow(dead_code)]
 mod completions;
 mod engine;
@@ -58,6 +59,10 @@ fn main() -> Result<()> {
     let ws = build_workspace(&root_dir);
     let status = build_status_bar(&ws);
     let mut program = Program::new(Box::new(status), Box::new(ws));
+    program.insert_named(
+        "sidekick",
+        Box::new(txv_widgets::sidekick_manager::SidekickManager::new()),
+    );
     let mut app_state = AppState::new(root_dir);
 
     // Initial lineage tree refresh from loaded registry.
