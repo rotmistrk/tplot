@@ -742,6 +742,47 @@ The MVP is small: a convenient interactive shell for data exploration with visua
 - Syntax highlighting with sub-language zones
 
 
+## Control Server (MCP-compatible)
+
+A local server (Unix socket or 127.0.0.1) exposes tplot operations via
+MCP-protocol-compatible JSON messages. Same commands as the REPL — same
+code path, different transport.
+
+### Transport
+
+- **Unix socket**: `$PROJECT/.tplot/tplot.sock` (default)
+- **TCP**: `127.0.0.1:PORT` (opt-in with `--listen`)
+- Never binds to external interfaces
+
+### Protocol
+
+Standard MCP JSON-RPC messages. Each tplot command is a tool:
+
+```json
+{"method": "tools/call", "params": {"name": "sql", "arguments": {"query": "SELECT * FROM auth"}}}
+{"method": "tools/call", "params": {"name": "plot", "arguments": {"type": "bar", "data": "top_ips", "x": "src_ip", "y": "hits"}}}
+{"method": "tools/call", "params": {"name": "into", "arguments": {"table": "flows", "file": "/tmp/data.csv"}}}
+```
+
+### Architecture
+
+```
+REPL input ─┐
+             ├──→ execute_command() ──→ Registry + Engine + UI
+MCP server ──┘
+```
+
+Both the REPL and the MCP server feed into the same `execute_command()` handler.
+The MCP server additionally returns results as JSON (for programmatic use).
+
+### Use cases
+
+- Kiro agent drives tplot (create nodes, run queries, read results)
+- External scripts interact with running tplot session
+- Debugging: inspect state, trigger re-runs, read tree structure
+- CI/automation: headless script execution with progress monitoring
+
+
 ## Multi-Table Output
 
 Some tools produce multiple tables (e.g., logmine → templates + records).
