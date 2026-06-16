@@ -31,7 +31,7 @@ pub fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
         (0.3, SplitNode::leaf(2)),
     ]);
 
-    let mut ws = TiledWorkspace::new(configs, wide_layout, narrow_layout, 300);
+    let mut ws = TiledWorkspace::new(configs, wide_layout, narrow_layout, 100);
     ws.set_handle_keys(false);
 
     add_left_tabs(&mut ws, _root_dir);

@@ -120,10 +120,11 @@ impl ReplView {
             .with_cursor(self.completion_selected);
         let h = (count.min(10) as u16) + 2;
         let w = (max_w as u16 + 4).clamp(14, 50);
-        // cursor position within the REPL view: (cx, cy)
-        let cy = self.state.bounds().h().saturating_sub(1);
-        let cx = 7u16 + (self.cursor as u16).min(40);
+        // Place dropdown above prompt: last row of view minus dropdown height
+        let cy = self.state.bounds().h().saturating_sub(h + 1);
+        let cx = 0u16;
         let rect = txv_core::prelude::Rect::new(cx, cy, w, h);
+        eprintln!("DROPDOWN: view_id={}, cx={cx}, cy={cy}", self.state.id());
         let data = SidekickRequest::new(Box::new(menu), rect, self.state.id());
         self.state.put_command(CM_SIDEKICK_SHOW, Some(Box::new(data)));
         self.completion_items = items;

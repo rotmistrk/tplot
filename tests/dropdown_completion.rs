@@ -76,6 +76,18 @@ fn dropdown_position_above_cursor() {
         }
     }
 
+    // Debug: check origin_of for the REPL view
+    if let Some(group) = h.program.desktop_mut().group_state() {
+        let origin = group.origin_of(15); // REPL view_id from debug output
+        println!("TiledWorkspace.origin_of(15) = {origin:?}");
+        // Also check all children origins
+        for i in 0..group.child_count() {
+            let co = group.child_origin(i);
+            let cid = group.child(i).map(|c| c.view_id()).unwrap_or(0);
+            println!("  child {i}: origin={co:?}, view_id={cid}");
+        }
+    }
+
     let prompt_row = find_prompt_row(&h, height).expect("prompt not found");
     let dropdown_bottom = find_dropdown_bottom(&h, height).expect("dropdown bottom not found");
 
