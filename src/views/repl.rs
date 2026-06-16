@@ -118,9 +118,10 @@ impl ReplView {
             .with_filter(FilterMode::None);
         let h = (count.min(10) as u16) + 2;
         let w = (max_w as u16 + 4).clamp(14, 50);
-        let prompt_y = self.state.bounds().h().saturating_sub(1);
-        let cursor_x = (self.cursor as u16) + 7;
-        let rect = txv_core::prelude::Rect::new(cursor_x, prompt_y.saturating_sub(h), w, h);
+        // Position: cursor coords within this view. SidekickManager places popup at (cx, cy+1).
+        let prompt_y = self.state.bounds().h().saturating_sub(2); // row above prompt
+        let cursor_x = (self.cursor as u16).min(20); // don't go too far right
+        let rect = txv_core::prelude::Rect::new(cursor_x, prompt_y, w, h);
         let data = SidekickRequest::new(Box::new(menu), rect, self.state.id());
         self.state.put_command(CM_SIDEKICK_SHOW, Some(Box::new(data)));
         self.completion_items = items;
