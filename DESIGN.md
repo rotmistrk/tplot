@@ -741,6 +741,51 @@ The MVP is small: a convenient interactive shell for data exploration with visua
 - Session persistence (tabs survive restart)
 - Syntax highlighting with sub-language zones
 
+
+## Multi-Table Output
+
+Some tools produce multiple tables (e.g., logmine → templates + records).
+Two syntax forms:
+
+```tcl
+# Prefix mode: tool picks suffixes
+into auth. [logmine /var/log/auth.log]
+# produces: auth.templates, auth.records
+
+# Explicit mapping: user picks names
+into %[tpl, data] [logmine /var/log/auth.log]
+# produces: tpl, data
+```
+
+Both create multiple nodes in the lineage tree from a single command.
+
+## Companion Tools
+
+External tools that integrate with tplot as preprocessors or drivers.
+
+### logmine — Log Structure Discovery
+
+Separate tool. Reads unstructured logs, discovers message templates,
+extracts structured fields. Outputs 2 tables:
+
+- `templates` — discovered patterns with placeholders (`{user}`, `{ip}`)
+- `records` — each log line with template_id + extracted field values
+
+```tcl
+# As exec preprocessor:
+into auth. [exec logmine /var/log/auth.log --format syslog]
+
+# As driver:
+into auth. -source logmine {/var/log/auth.log --format syslog}
+
+# Then analyze in tplot:
+sql -name top_patterns {SELECT pattern, count FROM auth.templates ORDER BY count DESC}
+sql -name failed {SELECT * FROM auth.records WHERE template_id = 3}
+plot bar top_patterns pattern count
+```
+
+Algorithms: Drain (fast online), Spell (LCS-based), or simple token-skeleton clustering.
+
 ## Non-Goals
 
 - Not a remote DB client
