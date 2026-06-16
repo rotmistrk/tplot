@@ -1,6 +1,7 @@
 //! Command handler — dispatches commands from the TUI event loop.
 
 use txv_core::program::CommandContext;
+use txv_widgets::dropdown_menu::CM_DROPDOWN_DONE;
 use txv_widgets::sidekick::CM_SIDEKICK_RESULT;
 use txv_widgets::tiled_workspace::TiledWorkspace;
 use txv_widgets::CM_STATUS_MESSAGE;
@@ -33,12 +34,32 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
         CM_REPL_TAB => handle_repl_tab(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
         CM_SIDEKICK_RESULT => {
-            // User picked from dropdown — apply completion.
+            // User picked from dropdown — apply completion (String payload).
             if let Some(text) = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()) {
                 let text = text.clone();
                 if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
                     repl.apply_completion(&text);
                     repl.sidekick_visible = false;
+                }
+            }
+        }
+        CM_DROPDOWN_DONE => {
+            // Dropdown confirmed selection (usize index payload).
+            // Re-run completion to get the items, pick by index.
+            if let Some(&idx) = ctx.data().as_ref().and_then(|d| d.downcast_ref::<usize>()) {
+                let input = {
+                    let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
+                        return;
+                    };
+                    repl.current_input().to_string()
+                };
+                let completions = crate::completions::complete(&input, state.engine(), &state.registry);
+                if let Some(c) = completions.get(idx) {
+                    let text = c.text.clone();
+                    if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
+                        repl.apply_completion(&text);
+                        repl.sidekick_visible = false;
+                    }
                 }
             }
         }

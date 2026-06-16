@@ -151,6 +151,37 @@ impl ReplView {
 
     fn handle_key_event(&mut self, key: txv_core::event::KeyEvent) -> HandleResult {
         let code = key.code();
+
+        // When dropdown is visible, forward navigation keys to sidekick.
+        if self.sidekick_visible {
+            use txv_widgets::sidekick::{CM_SIDEKICK_APPLY, CM_SIDEKICK_HIDE, CM_SIDEKICK_NEXT, CM_SIDEKICK_PREV};
+            match code {
+                KeyCode::Down => {
+                    self.state.put_command(CM_SIDEKICK_NEXT, None);
+                    return HandleResult::Consumed;
+                }
+                KeyCode::Up => {
+                    self.state.put_command(CM_SIDEKICK_PREV, None);
+                    return HandleResult::Consumed;
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    self.state.put_command(CM_SIDEKICK_APPLY, None);
+                    self.sidekick_visible = false;
+                    return HandleResult::Consumed;
+                }
+                KeyCode::Esc => {
+                    self.state.put_command(CM_SIDEKICK_HIDE, None);
+                    self.sidekick_visible = false;
+                    return HandleResult::Consumed;
+                }
+                _ => {
+                    // Any other key: hide dropdown, handle normally.
+                    self.state.put_command(CM_SIDEKICK_HIDE, None);
+                    self.sidekick_visible = false;
+                }
+            }
+        }
+
         match code {
             KeyCode::Enter => {
                 if !self.input.is_empty() {
