@@ -55,6 +55,12 @@ fn main() -> Result<()> {
     let mut program = Program::new(Box::new(status), Box::new(ws));
     let mut app_state = AppState::new(root_dir);
 
+    // Initial lineage tree refresh from loaded registry.
+    {
+        let desktop = program.desktop_mut();
+        crate::handler::initial_refresh(desktop, &app_state.registry);
+    }
+
     let mut backend = CrosstermBackend::new(ColorMode::TrueColor);
     program.run(&mut backend, |ctx| {
         handle_command(ctx, &mut app_state);

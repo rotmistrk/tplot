@@ -21,7 +21,7 @@ impl AppState {
             Engine::open_memory().expect("in-memory DB")
         });
         let scripting = ScriptEngine::new();
-        let registry = Registry::new();
+        let registry = Registry::open(&root_dir);
         Self {
             root_dir,
             engine,

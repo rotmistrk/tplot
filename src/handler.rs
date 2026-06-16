@@ -16,6 +16,11 @@ use crate::views::plot::PlotView;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT, CM_REPL_TAB};
 use crate::views::table::TableView;
 
+/// Refresh lineage tree on startup (called from main before event loop).
+pub(crate) fn initial_refresh(desktop: &mut dyn txv_core::prelude::View, registry: &registry::Registry) {
+    refresh_lineage_tree(desktop, registry);
+}
+
 pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     match ctx.command() {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),

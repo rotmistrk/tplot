@@ -34,11 +34,27 @@ impl Node {
 /// Manages the lineage graph.
 pub(crate) struct Registry {
     nodes: Vec<Node>,
+    nodes_dir: Option<std::path::PathBuf>,
 }
 
 impl Registry {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self { nodes: Vec::new() }
+        Self {
+            nodes: Vec::new(),
+            nodes_dir: None,
+        }
+    }
+
+    /// Create registry backed by a project directory. Loads existing nodes.
+    pub(crate) fn open(project_dir: &std::path::Path) -> Self {
+        let nodes_dir = project_dir.join("nodes");
+        let _ = std::fs::create_dir_all(&nodes_dir);
+        let nodes = load_all_nodes(&nodes_dir);
+        Self {
+            nodes,
+            nodes_dir: Some(nodes_dir),
+        }
     }
 
     pub(crate) fn nodes(&self) -> &[Node] {
@@ -63,13 +79,15 @@ impl Registry {
             last_run_at: Some(SystemTime::now()),
             ..NodeMeta::default()
         };
-        self.nodes.push(Node {
+        let node = Node {
             name: name.to_string(),
             parents: vec![],
             behavior,
             status: NodeStatus::UpToDate,
             meta,
-        });
+        };
+        self.persist(&node);
+        self.nodes.push(node);
     }
 
     /// Add a query node.
@@ -85,13 +103,15 @@ impl Registry {
             ..NodeMeta::default()
         };
         let parents = parent.map(|p| vec![p.to_string()]).unwrap_or_default();
-        self.nodes.push(Node {
+        let node = Node {
             name: name.to_string(),
             parents,
             behavior,
             status: NodeStatus::UpToDate,
             meta,
-        });
+        };
+        self.persist(&node);
+        self.nodes.push(node);
     }
 
     /// Add a plot node.
@@ -104,13 +124,15 @@ impl Registry {
             columns: columns.to_vec(),
         });
         let parents = vec![data_source.to_string()];
-        self.nodes.push(Node {
+        let node = Node {
             name: name.to_string(),
             parents,
             behavior,
             status: NodeStatus::UpToDate,
             meta: NodeMeta::default(),
-        });
+        };
+        self.persist(&node);
+        self.nodes.push(node);
     }
 
     /// Mark all children of a node as Dirty.
@@ -125,6 +147,12 @@ impl Registry {
 
     fn remove_by_name(&mut self, name: &str) {
         self.nodes.retain(|n| n.name != name);
+    }
+
+    fn persist(&self, node: &Node) {
+        if let Some(ref dir) = self.nodes_dir {
+            save_node(dir, node);
+        }
     }
 }
 
@@ -185,6 +213,138 @@ mod tests {
             _ => panic!("expected Table"),
         }
     }
+}
+
+// ─── Persistence ────────────────────────────────────────────────────────
+
+/// Save a node as node.tcl. File name = node name (sanitized).
+fn save_node(nodes_dir: &std::path::Path, node: &Node) {
+    let file_name = sanitize_name(&node.name);
+    let path = nodes_dir.join(format!("{file_name}.tcl"));
+    let mut content = String::new();
+    content.push_str(&format!("# node: {}\n", node.name));
+    if !node.parents.is_empty() {
+        content.push_str(&format!("# parent: {}\n", node.parents.join(", ")));
+    }
+    content.push_str(&format!("# icon: {}\n", node.icon()));
+    if let Some(count) = node.meta.row_count {
+        content.push_str(&format!("# rows: {count}\n"));
+    }
+    content.push('\n');
+    content.push_str(node.command());
+    content.push('\n');
+    let _ = std::fs::write(path, content);
+}
+
+/// Load all nodes from .tcl files in the nodes directory.
+fn load_all_nodes(nodes_dir: &std::path::Path) -> Vec<Node> {
+    let Ok(entries) = std::fs::read_dir(nodes_dir) else {
+        return vec![];
+    };
+    let mut nodes = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("tcl") {
+            continue;
+        }
+        if let Some(node) = parse_node_file(&path) {
+            nodes.push(node);
+        }
+    }
+    nodes
+}
+
+fn parse_node_file(path: &std::path::Path) -> Option<Node> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut name = String::new();
+    let mut parents = Vec::new();
+    let mut icon = String::new();
+    let mut row_count = None;
+    let mut command_lines = Vec::new();
+
+    for line in content.lines() {
+        if let Some(v) = line.strip_prefix("# node: ") {
+            name = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("# parent: ") {
+            parents = v
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        } else if let Some(v) = line.strip_prefix("# icon: ") {
+            icon = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("# rows: ") {
+            row_count = v.trim().parse().ok();
+        } else if !line.starts_with('#') && !line.is_empty() {
+            command_lines.push(line.to_string());
+        }
+    }
+
+    if name.is_empty() {
+        return None;
+    }
+
+    let cmd = command_lines.join("\n");
+    let behavior: Box<dyn NodeBehavior> = match icon.as_str() {
+        "[T]" => Box::new(TableNode {
+            table_name: name.clone(),
+            cmd: cmd.clone(),
+            create_sql: cmd.clone(),
+        }),
+        "[P]" => {
+            // Parse plot command: "plot <type> <source> <col1> <col2>..."
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            Box::new(PlotNode {
+                cmd: cmd.clone(),
+                plot_type: parts.get(1).unwrap_or(&"bar").to_string(),
+                data_source: parts.get(2).unwrap_or(&"").to_string(),
+                columns: parts.iter().skip(3).map(|s| s.to_string()).collect(),
+            })
+        }
+        _ => {
+            // Default: query node. Extract SQL from command.
+            let sql = if let Some(rest) = cmd.strip_prefix("sql -name ") {
+                rest.find('{')
+                    .map(|i| &rest[i + 1..rest.len() - 1])
+                    .unwrap_or("")
+                    .to_string()
+            } else if let Some(rest) = cmd.strip_prefix("sql {") {
+                rest.trim_end_matches('}').to_string()
+            } else if let Some(rest) = cmd.strip_prefix("derive ") {
+                rest.find('{')
+                    .map(|i| &rest[i + 1..rest.len() - 1])
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                cmd.clone()
+            };
+            Box::new(QueryNode { cmd: cmd.clone(), sql })
+        }
+    };
+
+    let meta = NodeMeta {
+        row_count,
+        ..NodeMeta::default()
+    };
+    Some(Node {
+        name,
+        parents,
+        behavior,
+        status: NodeStatus::UpToDate,
+        meta,
+    })
+}
+
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 // Table reference detection moved to sql_analysis module.
