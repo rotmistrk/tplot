@@ -19,6 +19,8 @@ pub(crate) struct ReplView {
     hist_pos: Option<usize>,
     scroll: usize,
     pub(crate) sidekick_visible: bool,
+    completion_items: Vec<String>,
+    completion_selected: usize,
 }
 
 #[derive(Clone)]
@@ -40,6 +42,8 @@ impl ReplView {
             hist_pos: None,
             scroll: 0,
             sidekick_visible: false,
+            completion_items: Vec::new(),
+            completion_selected: 0,
         }
     }
 
@@ -101,29 +105,40 @@ impl ReplView {
         use txv_widgets::dropdown_menu::{DropdownMenu, FilterMode, NumberMode};
         use txv_widgets::sidekick::{SidekickRequest, CM_SIDEKICK_SHOW};
 
+        if items.is_empty() {
+            self.dismiss_completion();
+            return;
+        }
+
         let count = items.len();
         let max_w = items.iter().map(|s| s.len()).max().unwrap_or(10);
-        let source = crate::completion_source::CompletionListSource::new(items);
+        let source = crate::completion_source::CompletionListSource::new(items.clone());
         let menu = DropdownMenu::new(source)
             .with_numbers(NumberMode::None)
-            .with_filter(FilterMode::Prefix);
+            .with_filter(FilterMode::None);
         let h = (count.min(10) as u16) + 2;
         let w = (max_w as u16 + 4).clamp(14, 50);
-        // Position: cursor x in prompt, above the prompt line.
         let prompt_y = self.state.bounds().h().saturating_sub(1);
-        let cursor_x = (self.cursor as u16) + 7; // "tplot> " = 7
+        let cursor_x = (self.cursor as u16) + 7;
         let rect = txv_core::prelude::Rect::new(cursor_x, prompt_y.saturating_sub(h), w, h);
         let data = SidekickRequest::new(Box::new(menu), rect, self.state.id());
         self.state.put_command(CM_SIDEKICK_SHOW, Some(Box::new(data)));
+        self.completion_items = items;
         self.sidekick_visible = true;
     }
 
     /// Hide the completion dropdown.
     #[allow(dead_code)]
     pub(crate) fn hide_completion(&mut self) {
+        self.dismiss_completion();
+    }
+
+    fn dismiss_completion(&mut self) {
         if self.sidekick_visible {
             use txv_widgets::sidekick::CM_SIDEKICK_HIDE;
             self.sidekick_visible = false;
+            self.completion_items.clear();
+            self.completion_selected = 0;
             self.state.put_command(CM_SIDEKICK_HIDE, None);
         }
     }
@@ -155,32 +170,32 @@ impl ReplView {
     fn handle_key_event(&mut self, key: txv_core::event::KeyEvent) -> HandleResult {
         let code = key.code();
 
-        // When dropdown is visible, forward navigation keys to sidekick.
-        if self.sidekick_visible {
-            use txv_widgets::sidekick::{CM_SIDEKICK_APPLY, CM_SIDEKICK_HIDE, CM_SIDEKICK_NEXT, CM_SIDEKICK_PREV};
+        // When dropdown is visible, handle navigation locally.
+        if self.sidekick_visible && !self.completion_items.is_empty() {
             match code {
                 KeyCode::Down => {
-                    self.state.put_command(CM_SIDEKICK_NEXT, None);
+                    self.completion_selected = (self.completion_selected + 1) % self.completion_items.len();
+                    self.show_completion_dropdown(self.completion_items.clone());
                     return HandleResult::Consumed;
                 }
                 KeyCode::Up => {
-                    self.state.put_command(CM_SIDEKICK_PREV, None);
+                    let len = self.completion_items.len();
+                    self.completion_selected = (self.completion_selected + len - 1) % len;
+                    self.show_completion_dropdown(self.completion_items.clone());
                     return HandleResult::Consumed;
                 }
                 KeyCode::Enter | KeyCode::Tab => {
-                    self.state.put_command(CM_SIDEKICK_APPLY, None);
-                    self.sidekick_visible = false;
+                    let text = self.completion_items[self.completion_selected].clone();
+                    self.dismiss_completion();
+                    self.apply_completion(&text);
                     return HandleResult::Consumed;
                 }
                 KeyCode::Esc => {
-                    self.state.put_command(CM_SIDEKICK_HIDE, None);
-                    self.sidekick_visible = false;
+                    self.dismiss_completion();
                     return HandleResult::Consumed;
                 }
                 _ => {
-                    // Any other key: hide dropdown, handle normally.
-                    self.state.put_command(CM_SIDEKICK_HIDE, None);
-                    self.sidekick_visible = false;
+                    self.dismiss_completion();
                 }
             }
         }
