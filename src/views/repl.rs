@@ -102,7 +102,7 @@ impl ReplView {
 
     /// Show a completion dropdown.
     pub(crate) fn show_completion_dropdown(&mut self, items: Vec<String>) {
-        use txv_widgets::dropdown_menu::{DropdownMenu, FilterMode, NumberMode};
+        use txv_widgets::dropdown_menu::{DropdownMenu, FilterMode, NumberMode, OpenSide};
         use txv_widgets::sidekick::{SidekickRequest, CM_SIDEKICK_SHOW};
 
         if items.is_empty() {
@@ -115,13 +115,15 @@ impl ReplView {
         let source = crate::completion_source::CompletionListSource::new(items.clone());
         let menu = DropdownMenu::new(source)
             .with_numbers(NumberMode::None)
-            .with_filter(FilterMode::None);
+            .with_filter(FilterMode::None)
+            .with_open_side(OpenSide::None)
+            .with_cursor(self.completion_selected);
         let h = (count.min(10) as u16) + 2;
         let w = (max_w as u16 + 4).clamp(14, 50);
-        // Position: cursor coords within this view. SidekickManager places popup at (cx, cy+1).
-        let prompt_y = self.state.bounds().h().saturating_sub(2); // row above prompt
-        let cursor_x = (self.cursor as u16).min(20); // don't go too far right
-        let rect = txv_core::prelude::Rect::new(cursor_x, prompt_y, w, h);
+        // Cursor position relative to this view's origin.
+        let cy = self.state.bounds().h().saturating_sub(1); // prompt row
+        let cx = 7 + self.cursor as u16; // "tplot> " + cursor
+        let rect = txv_core::prelude::Rect::new(cx, cy, w, h);
         let data = SidekickRequest::new(Box::new(menu), rect, self.state.id());
         self.state.put_command(CM_SIDEKICK_SHOW, Some(Box::new(data)));
         self.completion_items = items;
