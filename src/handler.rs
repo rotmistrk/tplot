@@ -196,6 +196,10 @@ fn execute_command(
                     parent.as_deref(),
                     Some(result.row_count as u64),
                 );
+                // Create a DuckDB view so downstream commands can reference by name.
+                let _ = state
+                    .engine()
+                    .query(&format!("CREATE OR REPLACE VIEW \"{tab_name}\" AS {query}"));
                 insert_table_tab(desktop, &tab_name, result, &query);
             }
             Ok(msg)
