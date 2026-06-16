@@ -20,10 +20,11 @@ mod node_state;
 mod plot;
 mod registry;
 #[allow(dead_code)]
-mod registry2;
+mod registry_old;
 #[allow(dead_code)]
 mod scripting;
 mod slots;
+mod sql_analysis;
 mod status;
 mod views;
 mod workspace;

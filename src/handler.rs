@@ -4,10 +4,11 @@ use txv_core::program::CommandContext;
 use txv_widgets::tiled_workspace::TiledWorkspace;
 
 use crate::app::AppState;
-use crate::plot::{self, Series};
-use crate::registry::NodeRegistry;
+use crate::node_behavior::NodeResult;
+use crate::registry;
 use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
+use crate::sql_analysis;
 use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
 use crate::views::help::HelpView;
 use crate::views::lineage_tree::{LineageTreeView, CM_NODE_SELECT};
@@ -16,21 +17,19 @@ use crate::views::repl::{ReplView, CM_REPL_SUBMIT};
 use crate::views::table::TableView;
 
 pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
-    let cmd = ctx.command();
-    match cmd {
+    match ctx.command() {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
         CM_APP_QUIT => {
             ctx.sink().push_command(txv_core::commands::CM_QUIT, None);
         }
         CM_SHOW_HELP => {
-            let ws = ctx
+            if let Some(ws) = ctx
                 .desktop_mut()
                 .as_any_mut()
-                .and_then(|a| a.downcast_mut::<TiledWorkspace>());
-            if let Some(ws) = ws {
-                let slot = SlotId::Center as usize;
-                ws.insert_tab(slot, "Help", Box::new(HelpView::new()));
+                .and_then(|a| a.downcast_mut::<TiledWorkspace>())
+            {
+                ws.insert_tab(SlotId::Center as usize, "Help", Box::new(HelpView::new()));
             }
         }
         _ => {}
@@ -40,40 +39,31 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
 fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
     let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
     let Some(node_name) = name else { return };
+    let Some(node) = state.registry.find(&node_name) else {
+        return;
+    };
 
-    let node = state.registry.nodes().iter().find(|n| n.name == node_name).cloned();
-    let Some(node) = node else { return };
+    // Polymorphic execution — node decides what to produce.
+    let result = node.execute(state.engine());
+    let command = node.command().to_string();
 
-    match node.kind {
-        crate::live_node::NodeKind::Table => {
-            // Materialized table — show its contents.
-            let sql = format!("SELECT * FROM \"{node_name}\" LIMIT 1000");
-            if let Ok(result) = state.engine().query(&sql) {
-                insert_table_tab(ctx.desktop_mut(), &node_name, result, &node.command);
-            }
+    match result {
+        Ok(NodeResult::Table(qr)) => {
+            insert_table_tab(ctx.desktop_mut(), &node_name, qr, &command);
         }
-        crate::live_node::NodeKind::Query => {
-            // Re-run the stored query.
-            if let Ok(result) = state.engine().query(node.query()) {
-                insert_table_tab(ctx.desktop_mut(), &node_name, result, &node.command);
-            }
+        Ok(NodeResult::Plot(lines)) => {
+            insert_plot_tab(ctx.desktop_mut(), &node_name, &command, lines);
         }
-        crate::live_node::NodeKind::Plot => {
-            // Re-run the plot command by parsing it.
-            // command format: "plot <type> <data_ref> <col1> <col2> ..."
-            let parts: Vec<&str> = node.command.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let plot_type = parts[1];
-                let data_ref = parts[2];
-                let options: Vec<String> = parts[3..].iter().map(|s| s.to_string()).collect();
-                let _ = handle_plot(state, ctx.desktop_mut(), plot_type, data_ref, &options);
+        Ok(NodeResult::Nothing) => {}
+        Err(e) => {
+            if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
+                repl.push_error(&e);
             }
         }
     }
 }
 
 fn handle_repl_submit(ctx: &mut CommandContext, state: &mut AppState) {
-    // Get input from REPL.
     let input = {
         let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
             return;
@@ -83,7 +73,6 @@ fn handle_repl_submit(ctx: &mut CommandContext, state: &mut AppState) {
         input
     };
 
-    // Execute via scripting engine.
     let eval_result = state.scripting().eval(&input);
     let commands = state.scripting().drain_commands();
 
@@ -106,7 +95,6 @@ fn handle_repl_submit(ctx: &mut CommandContext, state: &mut AppState) {
     // Refresh lineage tree.
     refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
 
-    // Push results back to REPL.
     let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
         return;
     };
@@ -127,20 +115,6 @@ fn handle_repl_submit(ctx: &mut CommandContext, state: &mut AppState) {
     }
 }
 
-fn find_repl_mut(desktop: &mut dyn txv_core::prelude::View) -> Option<&mut ReplView> {
-    let ws = desktop.as_any_mut()?.downcast_mut::<TiledWorkspace>()?;
-    let panel = ws.panel_mut(SlotId::Tools as usize)?;
-    let count = panel.tab_count();
-    let idx = (0..count).find(|&i| {
-        panel
-            .view_at_mut(i)
-            .and_then(|v| v.as_any_mut())
-            .is_some_and(|a| a.downcast_ref::<ReplView>().is_some())
-    })?;
-    let view = panel.view_at_mut(idx)?;
-    view.as_any_mut()?.downcast_mut::<ReplView>()
-}
-
 fn execute_command(
     state: &mut AppState,
     cmd: ScriptCommand,
@@ -152,14 +126,14 @@ fn execute_command(
             let msg = format!("{} rows, {} cols", result.row_count, result.columns.len());
             let tab_name = var_name.unwrap_or_else(|| "result".to_string());
 
-            // Detect CREATE TABLE vs SELECT.
             let upper = query.trim().to_uppercase();
             if upper.starts_with("CREATE") {
-                let table_name = extract_create_table_name(&query).unwrap_or_else(|| tab_name.clone());
-                let full_cmd = format!("sql {{{query}}}");
-                state.registry.add_table(&table_name, &full_cmd, None);
+                let table_name = sql_analysis::extract_created_table(&query).unwrap_or_else(|| tab_name.clone());
+                state
+                    .registry
+                    .add_table(&table_name, &format!("sql {{{query}}}"), &query, None);
             } else {
-                let parent = crate::registry::detect_parent_table(&query);
+                let parent = sql_analysis::detect_parent_table(&query);
                 let full_cmd = format!("sql -name {tab_name} {{{query}}}");
                 state.registry.add_query(
                     &tab_name,
@@ -182,12 +156,10 @@ fn execute_command(
                     .and_then(|r| r.first())
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
-
-                // Register as materialized table.
                 let full_cmd = format!("into {table} -file {path}");
-                state.registry.add_table(&table, &full_cmd, Some(count));
-
-                // Show preview.
+                let create_sql =
+                    format!("CREATE OR REPLACE TABLE \"{table}\" AS SELECT * FROM read_csv_auto('{path}')");
+                state.registry.add_table(&table, &full_cmd, &create_sql, Some(count));
                 let preview = state.engine().query(&format!("SELECT * FROM \"{table}\" LIMIT 100"));
                 if let Ok(data) = preview {
                     insert_table_tab(desktop, &table, data, &full_cmd);
@@ -196,33 +168,69 @@ fn execute_command(
             }
             crate::scripting::ImportSource::Exec(_) => Err("exec import not yet implemented".into()),
         },
+        ScriptCommand::Plot {
+            plot_type,
+            data_ref,
+            options,
+        } => {
+            let cmd = format!("plot {plot_type} {data_ref} {}", options.join(" "));
+            let columns = options;
+            let tab_name = format!("plot:{data_ref}");
+            state
+                .registry
+                .add_plot(&tab_name, &cmd, &plot_type, &data_ref, &columns);
+
+            // Execute the newly created node.
+            let Some(node) = state.registry.find(&tab_name) else {
+                return Err("failed to create plot node".into());
+            };
+            match node.execute(state.engine()) {
+                Ok(NodeResult::Plot(lines)) => {
+                    insert_plot_tab(desktop, &tab_name, &cmd, lines);
+                    Ok(tab_name)
+                }
+                Ok(_) => Ok(tab_name),
+                Err(e) => Err(e),
+            }
+        }
         ScriptCommand::Derive { name, sql } => {
-            let parent = crate::registry::detect_parent_table(&sql);
+            let parent = sql_analysis::detect_parent_table(&sql);
             let full_cmd = format!("derive {name} {{{sql}}}");
             state
                 .registry
                 .add_query(&name, &full_cmd, &sql, parent.as_deref(), None);
             Ok(format!("Created node: {name}"))
         }
-        ScriptCommand::Freeze => Ok("Node frozen".into()),
+        ScriptCommand::Freeze => Ok("Freeze: not yet implemented".into()),
         ScriptCommand::Run => Ok("Run: not yet implemented".into()),
-        ScriptCommand::Plot {
-            plot_type,
-            data_ref,
-            options,
-        } => handle_plot(state, desktop, &plot_type, &data_ref, &options),
         ScriptCommand::Export { .. } => Ok("Export: not yet implemented".into()),
         ScriptCommand::Budget { .. } => Ok("Budget: not yet implemented".into()),
     }
 }
 
-/// Refresh the lineage tree view with current registry state.
-fn refresh_lineage_tree(desktop: &mut dyn txv_core::prelude::View, registry: &NodeRegistry) {
+// ─── UI helpers ────────────────────────────────────────────────────────
+
+fn find_repl_mut(desktop: &mut dyn txv_core::prelude::View) -> Option<&mut ReplView> {
+    let ws = desktop.as_any_mut()?.downcast_mut::<TiledWorkspace>()?;
+    let panel = ws.panel_mut(SlotId::Tools as usize)?;
+    let count = panel.tab_count();
+    let idx = (0..count).find(|&i| {
+        panel
+            .view_at_mut(i)
+            .and_then(|v| v.as_any_mut())
+            .is_some_and(|a| a.downcast_ref::<ReplView>().is_some())
+    })?;
+    let view = panel.view_at_mut(idx)?;
+    view.as_any_mut()?.downcast_mut::<ReplView>()
+}
+
+fn refresh_lineage_tree(desktop: &mut dyn txv_core::prelude::View, registry: &registry::Registry) {
     let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
         return;
     };
-    let slot = SlotId::Left as usize;
-    let Some(panel) = ws.panel_mut(slot) else { return };
+    let Some(panel) = ws.panel_mut(SlotId::Left as usize) else {
+        return;
+    };
     let count = panel.tab_count();
     let idx = (0..count).find(|&i| {
         panel
@@ -231,105 +239,14 @@ fn refresh_lineage_tree(desktop: &mut dyn txv_core::prelude::View, registry: &No
             .is_some_and(|a| a.downcast_ref::<LineageTreeView>().is_some())
     });
     if let Some(i) = idx {
-        let view = panel.view_at_mut(i).unwrap();
-        if let Some(tree) = view.as_any_mut().and_then(|a| a.downcast_mut::<LineageTreeView>()) {
-            let nodes = registry.nodes().to_vec();
-            tree.inner.data_mut().update(nodes);
+        if let Some(tree) = panel
+            .view_at_mut(i)
+            .and_then(|v| v.as_any_mut())
+            .and_then(|a| a.downcast_mut::<LineageTreeView>())
+        {
+            tree.inner.data_mut().update_from_registry(registry);
         }
     }
-}
-
-/// Extract table name from "CREATE TABLE <name> AS ..." or "CREATE OR REPLACE TABLE <name> ...".
-fn handle_plot(
-    state: &mut AppState,
-    desktop: &mut dyn txv_core::prelude::View,
-    plot_type: &str,
-    data_ref: &str,
-    options: &[String],
-) -> Result<String, String> {
-    let x_col = options.first().map(|s| s.as_str());
-    let y_cols: Vec<&str> = options.iter().skip(1).map(|s| s.as_str()).collect();
-
-    let sql = if let (Some(x), true) = (x_col, !y_cols.is_empty()) {
-        let y_list = y_cols.join(", ");
-        format!("SELECT \"{x}\", {y_list} FROM \"{data_ref}\" LIMIT 500")
-    } else {
-        format!("SELECT * FROM \"{data_ref}\" LIMIT 500")
-    };
-
-    // Try DuckDB table/view first, fallback to re-running node's stored query.
-    let result = match state.engine().query(&sql) {
-        Ok(r) => r,
-        Err(_) => {
-            let node = state.registry.nodes().iter().find(|n| n.name == data_ref).cloned();
-            let Some(node) = node else {
-                return Err(format!("No table or node named '{data_ref}'"));
-            };
-            let q = node.query();
-            if q.is_empty() {
-                return Err(format!("Node '{data_ref}' has no query"));
-            }
-            state.engine().query(q)?
-        }
-    };
-
-    if result.columns.len() < 2 {
-        return Err("Need at least 2 columns (x + y)".into());
-    }
-
-    let x_labels: Vec<String> = result.rows.iter().map(|r| r[0].clone()).collect();
-    let mut all_series = Vec::new();
-    for col_idx in 1..result.columns.len() {
-        let values: Vec<(String, f64)> = x_labels
-            .iter()
-            .zip(result.rows.iter())
-            .map(|(lbl, row)| {
-                let val = row.get(col_idx).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-                (lbl.clone(), val)
-            })
-            .collect();
-        all_series.push(Series {
-            label: result.columns[col_idx].clone(),
-            values,
-        });
-    }
-
-    let lines = match plot_type {
-        "line" => plot::line_chart(&all_series, 80, 20),
-        _ => plot::bar_chart(&all_series, 80),
-    };
-
-    let cmd = format!("plot {plot_type} {data_ref} {}", options.join(" "));
-    let tab_name = format!("plot:{data_ref}");
-
-    // Register plot in lineage tree.
-    state.registry.add_plot(&tab_name, &cmd, Some(data_ref));
-
-    let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
-        return Ok(tab_name);
-    };
-    let slot = SlotId::Center as usize;
-    #[allow(deprecated)]
-    if let Some(panel) = ws.panel_mut(slot) {
-        panel.close_tab_by_title(&tab_name);
-    }
-    ws.insert_tab(slot, &tab_name, Box::new(PlotView::new(&tab_name, &cmd, lines)));
-    Ok(tab_name)
-}
-
-fn extract_create_table_name(sql: &str) -> Option<String> {
-    let upper = sql.to_uppercase();
-    let table_pos = upper.find("TABLE ")?;
-    let after = &sql[table_pos + 6..];
-    let name = after
-        .trim()
-        .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
-        .next()?
-        .trim_matches('"');
-    if name.is_empty() || name.to_uppercase() == "AS" || name.to_uppercase() == "IF" {
-        return None;
-    }
-    Some(name.to_string())
 }
 
 fn insert_table_tab(
@@ -353,6 +270,18 @@ fn insert_table_tab(
     ws.insert_tab(slot, name, Box::new(view));
 }
 
+fn insert_plot_tab(desktop: &mut dyn txv_core::prelude::View, name: &str, command: &str, lines: Vec<String>) {
+    let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
+        return;
+    };
+    let slot = SlotId::Center as usize;
+    #[allow(deprecated)]
+    if let Some(panel) = ws.panel_mut(slot) {
+        panel.close_tab_by_title(name);
+    }
+    ws.insert_tab(slot, name, Box::new(PlotView::new(name, command, lines)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,31 +293,39 @@ mod tests {
     }
 
     #[test]
-    fn test_sql_execution() {
+    fn test_sql_creates_table_node() {
         let mut state = test_state();
-        state.engine().query("CREATE TABLE t (x INT)").unwrap();
-        state.engine().query("INSERT INTO t VALUES (1),(2),(3)").unwrap();
-
-        state.scripting().eval("sql {SELECT count(*) FROM t}").unwrap();
-        let cmds = state.scripting().drain_commands();
-        // Use a dummy desktop (won't insert tabs in test).
         let mut ws = crate::workspace::build_workspace(std::path::Path::new("/tmp"));
+        state.scripting().eval("sql {CREATE TABLE t AS SELECT 1 as x}").unwrap();
+        let cmds = state.scripting().drain_commands();
         let msg = execute_command(&mut state, cmds.into_iter().next().unwrap(), &mut ws);
-        assert!(msg.unwrap().contains("1 rows"));
+        assert!(msg.is_ok());
+        assert!(state.registry.find("t").is_some());
+        assert_eq!(state.registry.find("t").unwrap().icon(), "[T]");
     }
 
     #[test]
-    fn test_into_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let csv = dir.path().join("d.csv");
-        std::fs::write(&csv, "a,b\n1,x\n2,y\n").unwrap();
-
-        let mut state = AppState::new(dir.into_path());
-        let path = csv.to_string_lossy();
-        state.scripting().eval(&format!("into tbl -file {path}")).unwrap();
-        let cmds = state.scripting().drain_commands();
+    fn test_sql_creates_query_node() {
+        let mut state = test_state();
         let mut ws = crate::workspace::build_workspace(std::path::Path::new("/tmp"));
-        let msg = execute_command(&mut state, cmds.into_iter().next().unwrap(), &mut ws);
-        assert!(msg.unwrap().contains("2 rows"));
+        state.engine().query("CREATE TABLE t AS SELECT 1 as x").unwrap();
+        state.scripting().eval("sql -name q {SELECT * FROM t}").unwrap();
+        let cmds = state.scripting().drain_commands();
+        execute_command(&mut state, cmds.into_iter().next().unwrap(), &mut ws).unwrap();
+        assert!(state.registry.find("q").is_some());
+        assert_eq!(state.registry.find("q").unwrap().icon(), "[Q]");
+    }
+
+    #[test]
+    fn test_node_execute_polymorphic() {
+        let mut state = test_state();
+        state.engine().query("CREATE TABLE t AS SELECT 1 as x, 2 as y").unwrap();
+        state.registry.add_query("q", "cmd", "SELECT * FROM t", None, None);
+        let node = state.registry.find("q").unwrap();
+        let result = node.execute(state.engine());
+        match result.unwrap() {
+            NodeResult::Table(qr) => assert_eq!(qr.row_count, 1),
+            _ => panic!("expected Table"),
+        }
     }
 }

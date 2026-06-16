@@ -1,17 +1,9 @@
-//! Lineage tree-table data — backed by live NodeRegistry.
+//! Lineage tree-table data — backed by the node Registry.
 
 use txv_core::cell::Style;
 use txv_widgets::tree_table_source::TreeTableSource;
 
-use crate::live_node::{LiveNode, NodeKind};
-
-/// Lineage tree-table data source, built from a snapshot of registry nodes.
-pub(crate) struct LineageData {
-    /// Flat list: (node_index, depth, expanded, is_link)
-    entries: Vec<Entry>,
-    visible: Vec<usize>,
-    nodes: Vec<LiveNode>,
-}
+use crate::registry::Registry;
 
 struct Entry {
     node_idx: usize,
@@ -19,18 +11,20 @@ struct Entry {
     expanded: bool,
 }
 
-impl LineageData {
-    pub(crate) fn from_nodes(nodes: Vec<LiveNode>) -> Self {
-        let mut data = Self {
-            entries: vec![],
-            visible: vec![],
-            nodes,
-        };
-        data.rebuild();
-        data
-    }
+/// Snapshot of registry for tree display.
+struct NodeSnapshot {
+    name: String,
+    icon: String,
+    parents: Vec<String>,
+}
 
-    #[allow(dead_code)]
+pub(crate) struct LineageData {
+    entries: Vec<Entry>,
+    visible: Vec<usize>,
+    nodes: Vec<NodeSnapshot>,
+}
+
+impl LineageData {
     pub(crate) fn empty() -> Self {
         Self {
             entries: vec![],
@@ -39,23 +33,28 @@ impl LineageData {
         }
     }
 
-    /// Replace nodes and rebuild tree.
-    pub(crate) fn update(&mut self, nodes: Vec<LiveNode>) {
-        self.nodes = nodes;
+    pub(crate) fn update_from_registry(&mut self, registry: &Registry) {
+        self.nodes = registry
+            .nodes()
+            .iter()
+            .map(|n| NodeSnapshot {
+                name: n.name.clone(),
+                icon: n.icon().to_string(),
+                parents: n.parents.clone(),
+            })
+            .collect();
         self.rebuild();
     }
 
     fn rebuild(&mut self) {
         self.entries.clear();
-        // Find roots (no parent).
         let roots: Vec<usize> = self
             .nodes
             .iter()
             .enumerate()
-            .filter(|(_, n)| n.parent.is_none())
+            .filter(|(_, n)| n.parents.is_empty())
             .map(|(i, _)| i)
             .collect();
-
         for root_idx in roots {
             self.add_subtree(root_idx, 0);
         }
@@ -68,16 +67,14 @@ impl LineageData {
             depth,
             expanded: true,
         });
-
         let name = self.nodes[node_idx].name.clone();
         let children: Vec<usize> = self
             .nodes
             .iter()
             .enumerate()
-            .filter(|(_, n)| n.parent.as_deref() == Some(&name))
+            .filter(|(_, n)| n.parents.contains(&name))
             .map(|(i, _)| i)
             .collect();
-
         for child_idx in children {
             self.add_subtree(child_idx, depth + 1);
         }
@@ -147,11 +144,6 @@ impl TreeTableSource for LineageData {
             return "";
         }
         let entry = &self.entries[self.visible[row]];
-        let node = &self.nodes[entry.node_idx];
-        match node.kind {
-            NodeKind::Table => "[T]",
-            NodeKind::Query => "[Q]",
-            NodeKind::Plot => "[P]",
-        }
+        &self.nodes[entry.node_idx].icon
     }
 }

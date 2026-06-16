@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::engine::Engine;
-use crate::registry::NodeRegistry;
+use crate::registry::Registry;
 use crate::scripting::ScriptEngine;
 
 pub(crate) struct AppState {
@@ -11,7 +11,7 @@ pub(crate) struct AppState {
     root_dir: PathBuf,
     engine: Engine,
     scripting: ScriptEngine,
-    pub(crate) registry: NodeRegistry,
+    pub(crate) registry: Registry,
 }
 
 impl AppState {
@@ -21,7 +21,7 @@ impl AppState {
             Engine::open_memory().expect("in-memory DB")
         });
         let scripting = ScriptEngine::new();
-        let registry = NodeRegistry::new(&root_dir);
+        let registry = Registry::new();
         Self {
             root_dir,
             engine,

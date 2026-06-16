@@ -12,7 +12,7 @@ use crate::views::placeholder::PlaceholderView;
 use crate::views::repl::ReplView;
 
 /// Build the tplot workspace with 3 panels (left, center, tools).
-pub(crate) fn build_workspace(root_dir: &Path) -> TiledWorkspace {
+pub(crate) fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
     let configs = vec![
         PanelConfig::fixed("Lineage", PanelPosition::Left),
         PanelConfig::new("Main", PanelPosition::Center).with_splittable(),
@@ -34,7 +34,7 @@ pub(crate) fn build_workspace(root_dir: &Path) -> TiledWorkspace {
     let mut ws = TiledWorkspace::new(configs, wide_layout, narrow_layout, 300);
     ws.set_handle_keys(false);
 
-    add_left_tabs(&mut ws, root_dir);
+    add_left_tabs(&mut ws, _root_dir);
     add_center_tabs(&mut ws);
     add_tools_tabs(&mut ws);
 
@@ -42,10 +42,9 @@ pub(crate) fn build_workspace(root_dir: &Path) -> TiledWorkspace {
     ws
 }
 
-fn add_left_tabs(ws: &mut TiledWorkspace, root_dir: &Path) {
+fn add_left_tabs(ws: &mut TiledWorkspace, _root_dir: &Path) {
     let slot = SlotId::Left as usize;
-    let nodes = crate::live_node::load_nodes_from_disk(&root_dir.join("nodes"));
-    let lineage_data = LineageData::from_nodes(nodes);
+    let lineage_data = LineageData::empty();
     let lineage_view = LineageTreeView::new(lineage_data);
     ws.insert_tab(slot, "Lineage", Box::new(lineage_view));
     insert(ws, slot, "Library", "Recipes & tools");
