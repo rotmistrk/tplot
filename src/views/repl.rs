@@ -170,18 +170,34 @@ impl ReplView {
     fn handle_key_event(&mut self, key: txv_core::event::KeyEvent) -> HandleResult {
         let code = key.code();
 
-        // When sidekick is visible, let navigation keys pass through to the dropdown.
-        if self.sidekick_visible {
+        // Sidekick dropdown is display-only in txv. Navigation handled here.
+        if self.sidekick_visible && !self.completion_items.is_empty() {
             match code {
-                KeyCode::Up | KeyCode::Down | KeyCode::Enter => {
-                    return HandleResult::Ignored;
+                KeyCode::Down => {
+                    self.completion_selected = (self.completion_selected + 1) % self.completion_items.len();
+                    // Re-show with updated selection.
+                    let items = self.completion_items.clone();
+                    self.show_completion_dropdown(items);
+                    return HandleResult::Consumed;
+                }
+                KeyCode::Up => {
+                    let len = self.completion_items.len();
+                    self.completion_selected = (self.completion_selected + len - 1) % len;
+                    let items = self.completion_items.clone();
+                    self.show_completion_dropdown(items);
+                    return HandleResult::Consumed;
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    let text = self.completion_items[self.completion_selected].clone();
+                    self.dismiss_completion();
+                    self.apply_completion(&text);
+                    return HandleResult::Consumed;
                 }
                 KeyCode::Esc => {
                     self.dismiss_completion();
                     return HandleResult::Consumed;
                 }
                 _ => {
-                    // Any typing dismisses the dropdown.
                     self.dismiss_completion();
                 }
             }
