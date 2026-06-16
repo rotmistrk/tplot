@@ -22,13 +22,30 @@ pub(crate) fn extract_table_refs(sql: &str) -> Vec<String> {
 /// Extract the table name being created (CREATE TABLE <name>).
 pub(crate) fn extract_created_table(sql: &str) -> Option<String> {
     let dialect = DuckDbDialect {};
-    let statements = Parser::parse_sql(&dialect, sql).ok()?;
-    for stmt in &statements {
-        if let Statement::CreateTable(ct) = stmt {
-            return Some(ct.name.to_string());
+    if let Ok(statements) = Parser::parse_sql(&dialect, sql) {
+        for stmt in &statements {
+            if let Statement::CreateTable(ct) = stmt {
+                return Some(ct.name.to_string());
+            }
         }
     }
-    None
+    // Fallback: regex for DuckDB-specific syntax that sqlparser can't handle.
+    extract_created_table_fallback(sql)
+}
+
+/// Regex fallback for CREATE [OR REPLACE] TABLE <name>.
+fn extract_created_table_fallback(sql: &str) -> Option<String> {
+    let upper = sql.to_uppercase();
+    let pos = upper.find("TABLE ")?;
+    let after = sql[pos + 6..].trim();
+    let name = after
+        .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
+        .next()?
+        .trim_matches('"');
+    if name.is_empty() || name.eq_ignore_ascii_case("IF") || name.eq_ignore_ascii_case("AS") {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 /// Determine parent table: first table referenced in FROM clause of a SELECT.
@@ -135,6 +152,20 @@ mod tests {
             extract_created_table("CREATE TABLE auth AS SELECT * FROM events"),
             Some("auth".into())
         );
+    }
+
+    #[test]
+    fn test_create_or_replace() {
+        let sql = "CREATE OR REPLACE TABLE ufw AS SELECT 1 as x FROM read_csv('/tmp/x', header=false)";
+        let result = extract_created_table(sql);
+        assert_eq!(result, Some("ufw".into()), "got: {result:?}");
+    }
+
+    #[test]
+    fn test_create_or_replace_complex() {
+        let sql = r#"CREATE OR REPLACE TABLE ufw AS SELECT regexp_extract(column0, 'SRC=([0-9.]+)', 1) as src_ip FROM read_csv('/var/log/ufw.log', header=false, sep=E'\x01') WHERE column0 LIKE '%UFW BLOCK%'"#;
+        let result = extract_created_table(sql);
+        assert_eq!(result, Some("ufw".into()), "got: {result:?}");
     }
 
     #[test]
