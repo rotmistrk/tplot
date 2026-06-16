@@ -1,7 +1,7 @@
 //! Command handler — dispatches commands from the TUI event loop.
 
 use txv_core::program::CommandContext;
-use txv_widgets::dropdown_menu::CM_DROPDOWN_DONE;
+use txv_widgets::dropdown_menu::{CM_DROPDOWN_CANCELLED, CM_DROPDOWN_DONE};
 use txv_widgets::sidekick::CM_SIDEKICK_RESULT;
 use txv_widgets::tiled_workspace::TiledWorkspace;
 use txv_widgets::CM_STATUS_MESSAGE;
@@ -61,6 +61,11 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
                         repl.sidekick_visible = false;
                     }
                 }
+            }
+        }
+        CM_DROPDOWN_CANCELLED => {
+            if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
+                repl.sidekick_visible = false;
             }
         }
         CM_APP_QUIT => {
