@@ -12,7 +12,7 @@ use crate::views::placeholder::PlaceholderView;
 use crate::views::repl::ReplView;
 
 /// Build the tplot workspace with 3 panels (left, center, tools).
-pub(crate) fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
+pub fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
     let configs = vec![
         PanelConfig::fixed("Lineage", PanelPosition::Left),
         PanelConfig::new("Main", PanelPosition::Center).with_splittable(),

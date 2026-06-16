@@ -32,7 +32,7 @@ impl Node {
 }
 
 /// Manages the lineage graph.
-pub(crate) struct Registry {
+pub struct Registry {
     nodes: Vec<Node>,
     nodes_dir: Option<std::path::PathBuf>,
 }

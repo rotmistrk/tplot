@@ -6,16 +6,16 @@ use crate::engine::Engine;
 use crate::registry::Registry;
 use crate::scripting::ScriptEngine;
 
-pub(crate) struct AppState {
+pub struct AppState {
     #[allow(dead_code)]
     root_dir: PathBuf,
     engine: Engine,
     scripting: ScriptEngine,
-    pub(crate) registry: Registry,
+    pub registry: Registry,
 }
 
 impl AppState {
-    pub(crate) fn new(root_dir: PathBuf) -> Self {
+    pub fn new(root_dir: PathBuf) -> Self {
         let engine = Engine::open(&root_dir).unwrap_or_else(|e| {
             log::error!("DuckDB open failed at {}: {e} — using in-memory", root_dir.display());
             Engine::open_memory().expect("in-memory DB")

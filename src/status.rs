@@ -10,7 +10,7 @@ use txv_widgets::{KeyLabelView, MessageView};
 pub(crate) const CM_APP_QUIT: CommandId = 800;
 pub(crate) const CM_SHOW_HELP: CommandId = 801;
 
-pub(crate) fn build_status_bar(desktop: &TiledWorkspace) -> StatusBar {
+pub fn build_status_bar(desktop: &TiledWorkspace) -> StatusBar {
     let mut bar = StatusBar::new();
 
     // Register workspace default bindings (tab switching, panel nav).
