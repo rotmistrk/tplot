@@ -7,6 +7,8 @@ use txv_core::view::HandleResult;
 
 /// Command ID emitted when user presses Enter in the REPL.
 pub(crate) const CM_REPL_SUBMIT: CommandId = 900;
+/// Command ID emitted when user presses Tab in the REPL.
+pub(crate) const CM_REPL_TAB: CommandId = 902;
 
 pub(crate) struct ReplView {
     state: ViewState,
@@ -71,6 +73,21 @@ impl ReplView {
         text
     }
 
+    /// Get current input text (for completion).
+    pub(crate) fn current_input(&self) -> &str {
+        &self.input
+    }
+
+    /// Replace the last word with the completion text.
+    pub(crate) fn apply_completion(&mut self, text: &str) {
+        // Find start of current word.
+        let before_cursor = &self.input[..self.cursor];
+        let word_start = before_cursor.rfind(' ').map(|i| i + 1).unwrap_or(0);
+        self.input.replace_range(word_start..self.cursor, text);
+        self.cursor = word_start + text.len();
+        self.state.mark_dirty();
+    }
+
     fn auto_scroll(&mut self) {
         let h = self.state.bounds().h() as usize;
         let visible = h.saturating_sub(1);
@@ -103,6 +120,10 @@ impl ReplView {
                     self.state.put_command(CM_REPL_SUBMIT, None);
                 }
                 self.state.mark_dirty();
+                HandleResult::Consumed
+            }
+            KeyCode::Tab => {
+                self.state.put_command(CM_REPL_TAB, None);
                 HandleResult::Consumed
             }
             KeyCode::Char(ch) => {

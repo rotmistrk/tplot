@@ -13,12 +13,13 @@ use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
 use crate::views::help::HelpView;
 use crate::views::lineage_tree::{LineageTreeView, CM_NODE_SELECT};
 use crate::views::plot::PlotView;
-use crate::views::repl::{ReplView, CM_REPL_SUBMIT};
+use crate::views::repl::{ReplView, CM_REPL_SUBMIT, CM_REPL_TAB};
 use crate::views::table::TableView;
 
 pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     match ctx.command() {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
+        CM_REPL_TAB => handle_repl_tab(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
         CM_APP_QUIT => {
             ctx.sink().push_command(txv_core::commands::CM_QUIT, None);
@@ -34,6 +35,54 @@ pub(crate) fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
         }
         _ => {}
     }
+}
+
+fn handle_repl_tab(ctx: &mut CommandContext, state: &mut AppState) {
+    let input = {
+        let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
+            return;
+        };
+        repl.current_input().to_string()
+    };
+    let completions = crate::completions::complete(&input, state.engine(), &state.registry);
+    if completions.len() == 1 {
+        // Single match — apply directly.
+        let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
+            return;
+        };
+        repl.apply_completion(&completions[0].text);
+    } else if completions.len() > 1 {
+        // Multiple matches — show them as output, apply common prefix.
+        let texts: Vec<&str> = completions.iter().map(|c| c.text.as_str()).collect();
+        let prefix = common_prefix(&texts);
+        let Some(repl) = find_repl_mut(ctx.desktop_mut()) else {
+            return;
+        };
+        if prefix.len() > input.split_whitespace().last().map_or(0, |w| w.len()) {
+            repl.apply_completion(&prefix);
+        } else {
+            let list = texts.join("  ");
+            repl.push_output(&list);
+        }
+    }
+}
+
+fn common_prefix(strings: &[&str]) -> String {
+    if strings.is_empty() {
+        return String::new();
+    }
+    let first = strings[0];
+    let mut len = first.len();
+    for s in &strings[1..] {
+        len = len.min(s.len());
+        for (i, (a, b)) in first.chars().zip(s.chars()).enumerate() {
+            if a != b {
+                len = len.min(i);
+                break;
+            }
+        }
+    }
+    first[..len].to_string()
 }
 
 fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {

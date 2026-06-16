@@ -1,6 +1,8 @@
 //! tplot — Terminal Data Analysis with Lineage Tracking
 
 mod app;
+#[allow(dead_code)]
+mod completions;
 mod engine;
 mod handler;
 mod help;
