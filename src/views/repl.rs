@@ -125,8 +125,9 @@ impl ReplView {
         // We want dropdown top at (prompt_row - h) within our view.
         // prompt_row = bounds.h() - 1, so: cy = bounds.h() - 1 - h - 1
         let view_h = self.state.bounds().h();
-        let cx = 7u16 + (self.cursor as u16).min(30);
-        let cy = view_h.saturating_sub(h + 2);
+        let cx = 0u16;
+        let cy = view_h.saturating_sub(2);
+        let rect = txv_core::prelude::Rect::new(cx, cy, w, h);
         let rect = txv_core::prelude::Rect::new(cx, cy, w, h);
         let data = SidekickRequest::new(Box::new(menu), rect, self.state.id());
         self.state.put_command(CM_SIDEKICK_SHOW, Some(Box::new(data)));
