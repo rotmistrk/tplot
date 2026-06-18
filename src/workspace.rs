@@ -7,9 +7,9 @@ use txv_widgets::tiled_workspace::TiledWorkspace;
 
 use crate::lineage_data::LineageData;
 use crate::slots::SlotId;
+use crate::views::cmd_editor::CommandEditor;
 use crate::views::lineage_tree::LineageTreeView;
 use crate::views::placeholder::PlaceholderView;
-use crate::views::repl::ReplView;
 
 /// Build the tplot workspace with 3 panels (left, center, tools).
 pub fn build_workspace(_root_dir: &Path) -> TiledWorkspace {
@@ -61,8 +61,8 @@ fn add_center_tabs(ws: &mut TiledWorkspace) {
 
 fn add_tools_tabs(ws: &mut TiledWorkspace) {
     let slot = SlotId::Tools as usize;
-    let repl = ReplView::new();
-    ws.insert_tab(slot, "Tcl", Box::new(repl));
+    let cmd = CommandEditor::new();
+    ws.insert_tab(slot, "Cmd", Box::new(cmd));
     insert(ws, slot, "Shell", "Terminal (not yet)");
     insert(ws, slot, "Messages", "Log output");
     if let Some(panel) = ws.panel_mut(slot) {

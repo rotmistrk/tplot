@@ -30,7 +30,10 @@ impl TestHarness {
         let ws = build_workspace(root_dir);
         let status = build_status_bar(&ws);
         let mut program = Program::new(Box::new(status), Box::new(ws));
-        program.insert_named("sidekick", Box::new(SidekickManager::new()));
+        let sk = SidekickManager::new();
+        use txv_core::prelude::View as _V;
+        println!("SIDEKICK view_id = {}", _V::view_id(&sk));
+        program.insert_named("sidekick", Box::new(sk));
         let state = AppState::new(root_dir.to_path_buf());
         tplot::handler::initial_refresh(program.desktop_mut(), &state.registry);
         let backend = MockBackend::new(width, height);

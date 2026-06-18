@@ -13,6 +13,7 @@ use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
 use crate::sql_analysis;
 use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
+use crate::views::cmd_editor::{CommandEditor, CM_EXEC_BUFFER, CM_EXEC_LINE};
 use crate::views::help::HelpView;
 use crate::views::lineage_tree::{LineageTreeView, CM_NODE_SELECT};
 use crate::views::plot::PlotView;
@@ -32,6 +33,9 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     match ctx.command() {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
         CM_REPL_TAB => handle_repl_tab(ctx, state),
+        CM_EXEC_COMMAND => handle_exec_command(ctx, state),
+        CM_EXEC_LINE => handle_exec_line(ctx, state),
+        CM_EXEC_BUFFER => handle_exec_buffer(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
         CM_SIDEKICK_RESULT => {
             // User picked from dropdown — apply completion (String payload).
@@ -141,6 +145,102 @@ fn common_prefix(strings: &[&str]) -> String {
         }
     }
     first[..len].to_string()
+}
+
+fn handle_exec_line(ctx: &mut CommandContext, state: &mut AppState) {
+    let text = {
+        let Some(editor) = find_cmd_editor(ctx.desktop_mut()) else {
+            return;
+        };
+        editor.current_line()
+    };
+    exec_text(ctx, state, &text);
+}
+
+fn handle_exec_buffer(ctx: &mut CommandContext, state: &mut AppState) {
+    let text = {
+        let Some(editor) = find_cmd_editor(ctx.desktop_mut()) else {
+            return;
+        };
+        editor.buffer_content()
+    };
+    // Execute line by line (skip comments and blanks).
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("--") {
+            continue;
+        }
+        exec_text(ctx, state, trimmed);
+    }
+}
+
+fn exec_text(ctx: &mut CommandContext, state: &mut AppState, text: &str) {
+    if text.trim().is_empty() || text.trim().starts_with("--") {
+        return;
+    }
+    let eval_result = state.scripting().eval(text);
+    let commands = state.scripting().drain_commands();
+    for cmd in commands {
+        match execute_command(state, cmd, ctx.desktop_mut()) {
+            Ok(msg) => {
+                if !msg.is_empty() {
+                    status_msg(ctx, &msg);
+                }
+            }
+            Err(e) => status_err(ctx, &e),
+        }
+    }
+    if let Err(e) = eval_result {
+        status_err(ctx, &e);
+    }
+    refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
+}
+
+fn find_cmd_editor(desktop: &mut dyn txv_core::prelude::View) -> Option<&mut CommandEditor> {
+    let ws = desktop.as_any_mut()?.downcast_mut::<TiledWorkspace>()?;
+    let panel = ws.panel_mut(SlotId::Tools as usize)?;
+    let count = panel.tab_count();
+    let idx = (0..count).find(|&i| {
+        panel
+            .view_at_mut(i)
+            .and_then(|v| v.as_any_mut())
+            .is_some_and(|a| a.downcast_ref::<CommandEditor>().is_some())
+    })?;
+    let view = panel.view_at_mut(idx)?;
+    view.as_any_mut()?.downcast_mut::<CommandEditor>()
+}
+
+fn handle_exec_command(ctx: &mut CommandContext, state: &mut AppState) {
+    let text = ctx
+        .data()
+        .as_ref()
+        .and_then(|d| d.downcast_ref::<String>())
+        .cloned()
+        .unwrap_or_default();
+    if text.is_empty() {
+        return;
+    }
+
+    // Execute via scripting engine.
+    let eval_result = state.scripting().eval(&text);
+    let commands = state.scripting().drain_commands();
+
+    for cmd in commands {
+        match execute_command(state, cmd, ctx.desktop_mut()) {
+            Ok(msg) => {
+                if !msg.is_empty() {
+                    status_msg(ctx, &msg);
+                }
+            }
+            Err(e) => status_err(ctx, &e),
+        }
+    }
+
+    if let Err(e) = eval_result {
+        status_err(ctx, &e);
+    }
+
+    refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
 }
 
 fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {

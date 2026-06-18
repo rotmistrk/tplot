@@ -34,6 +34,7 @@ pub fn build_status_bar(desktop: &TiledWorkspace) -> StatusBar {
 }
 
 fn add_visible_bindings(bar: &mut StatusBar) {
+    use crate::views::cmd_editor::{CM_EXEC_BUFFER, CM_EXEC_LINE};
     bar.add(
         StatusSlot::new(Box::new(KeyLabelView::new(
             key(KeyCode::F(1)),
@@ -43,6 +44,15 @@ fn add_visible_bindings(bar: &mut StatusBar) {
         .priority(6),
     );
     bar.add(StatusSlot::new(Box::new(KeyLabelView::new(key(KeyCode::F(5)), CM_TW_ZOOM, "~F5~:Zoom"))).priority(5));
+    bar.add(StatusSlot::new(Box::new(KeyLabelView::new(ctrl('e'), CM_EXEC_LINE, "~C-e~:Run"))).priority(7));
+    bar.add(
+        StatusSlot::new(Box::new(KeyLabelView::new(
+            KeyEvent::new(KeyCode::Char('e'), KeyMod::CTRL.with_shift()),
+            CM_EXEC_BUFFER,
+            "",
+        )))
+        .priority(4),
+    );
     bar.add(StatusSlot::new(Box::new(KeyLabelView::new(ctrl('q'), CM_APP_QUIT, "~C-q~:Quit"))).priority(9));
 }
 
