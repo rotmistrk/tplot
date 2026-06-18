@@ -44,7 +44,7 @@ impl Default for CommandEditor {
 }
 
 impl View for CommandEditor {
-    delegate_view!(inner, override { title, as_any_mut });
+    delegate_view!(inner, override { title, handle, as_any_mut });
 
     fn title(&self) -> &str {
         "Cmd"
@@ -52,5 +52,22 @@ impl View for CommandEditor {
 
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
+    }
+
+    fn handle(&mut self, event: &txv_core::event::Event) -> txv_core::view::HandleResult {
+        use txv_core::event::Event;
+        use txv_core::view::HandleResult;
+
+        if let Event::Paste(text) = event {
+            let editor = self.inner.editor_mut();
+            let offset = editor
+                .buf()
+                .line_col_to_offset(editor.cursor_line(), editor.cursor_col())
+                .unwrap_or(0);
+            editor.buf().insert(offset, text);
+            self.inner.mark_dirty();
+            return HandleResult::Consumed;
+        }
+        self.inner.handle(event)
     }
 }
