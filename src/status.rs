@@ -44,14 +44,21 @@ fn add_visible_bindings(bar: &mut StatusBar) {
         .priority(6),
     );
     bar.add(StatusSlot::new(Box::new(KeyLabelView::new(key(KeyCode::F(5)), CM_TW_ZOOM, "~F5~:Zoom"))).priority(5));
-    bar.add(StatusSlot::new(Box::new(KeyLabelView::new(ctrl('e'), CM_EXEC_LINE, "~C-e~:Run"))).priority(7));
     bar.add(
         StatusSlot::new(Box::new(KeyLabelView::new(
-            KeyEvent::new(KeyCode::Char('e'), KeyMod::CTRL.with_shift()),
-            CM_EXEC_BUFFER,
-            "",
+            key(KeyCode::F(9)),
+            CM_EXEC_LINE,
+            "~F9~:Run",
         )))
-        .priority(4),
+        .priority(7),
+    );
+    bar.add(
+        StatusSlot::new(Box::new(KeyLabelView::new(
+            key(KeyCode::F(10)),
+            CM_EXEC_BUFFER,
+            "~F10~:All",
+        )))
+        .priority(5),
     );
     bar.add(StatusSlot::new(Box::new(KeyLabelView::new(ctrl('q'), CM_APP_QUIT, "~C-q~:Quit"))).priority(9));
 }
