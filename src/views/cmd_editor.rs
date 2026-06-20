@@ -44,7 +44,7 @@ impl Default for CommandEditor {
 }
 
 impl View for CommandEditor {
-    delegate_view!(inner, override { title, handle, as_any_mut });
+    delegate_view!(inner, override { title, handle, as_any_mut, group_state });
 
     fn title(&self) -> &str {
         "Cmd"
@@ -54,20 +54,11 @@ impl View for CommandEditor {
         Some(self)
     }
 
-    fn handle(&mut self, event: &txv_core::event::Event) -> txv_core::view::HandleResult {
-        use txv_core::event::Event;
-        use txv_core::view::HandleResult;
+    fn group_state(&self) -> Option<&txv_core::group::GroupState> {
+        self.inner.group_state()
+    }
 
-        if let Event::Paste(text) = event {
-            let editor = self.inner.editor_mut();
-            let offset = editor
-                .buf()
-                .line_col_to_offset(editor.cursor_line(), editor.cursor_col())
-                .unwrap_or(0);
-            editor.buf().insert(offset, text);
-            self.inner.mark_dirty();
-            return HandleResult::Consumed;
-        }
+    fn handle(&mut self, event: &txv_core::event::Event) -> txv_core::view::HandleResult {
         self.inner.handle(event)
     }
 }
