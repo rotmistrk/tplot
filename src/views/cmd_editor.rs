@@ -31,6 +31,46 @@ impl CommandEditor {
         editor.buf().line(line).unwrap_or_default()
     }
 
+    /// Get the complete command at cursor — uses Tcl parser to find command boundaries.
+    /// Collects lines from cursor position until the Tcl parser accepts the input.
+    pub fn current_command(&self) -> String {
+        let editor = self.inner.editor();
+        let buf = editor.buf();
+        let cursor_line = editor.cursor_line();
+        let line_count = buf.line_count();
+
+        // Find start: scan backwards past empty/comment lines to find command start.
+        let mut start = cursor_line;
+        for i in (0..cursor_line).rev() {
+            let l = buf.line(i).unwrap_or_default();
+            let trimmed = l.trim();
+            if trimmed.is_empty() || trimmed.starts_with("--") || trimmed.starts_with('#') {
+                start = i + 1;
+                break;
+            }
+            start = i;
+        }
+
+        // Collect lines from start, try parsing after each addition.
+        let mut collected = String::new();
+        for i in start..line_count {
+            let l = buf.line(i).unwrap_or_default();
+            let trimmed = l.trim();
+            if i > start && trimmed.is_empty() && is_tcl_complete(&collected) {
+                break;
+            }
+            if !collected.is_empty() {
+                collected.push('\n');
+            }
+            collected.push_str(&l);
+            // If we've passed the cursor and the command is complete, stop.
+            if i >= cursor_line && is_tcl_complete(&collected) {
+                break;
+            }
+        }
+        collected
+    }
+
     /// Get full buffer content.
     pub fn buffer_content(&self) -> String {
         self.inner.content()
@@ -61,4 +101,11 @@ impl View for CommandEditor {
     fn handle(&mut self, event: &txv_core::event::Event) -> txv_core::view::HandleResult {
         self.inner.handle(event)
     }
+}
+
+/// Check if a string is a complete Tcl command (braces/quotes balanced).
+/// Uses rusticle's parser — if parse succeeds, the input is complete.
+fn is_tcl_complete(input: &str) -> bool {
+    use rusticle::parser::Parser;
+    Parser::parse(input).is_ok()
 }
