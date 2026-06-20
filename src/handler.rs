@@ -152,13 +152,12 @@ fn handle_exec_line(ctx: &mut CommandContext, state: &mut AppState) {
             status_err(ctx, "cmd editor not found");
             return;
         };
-        editor.current_line()
+        editor.current_command()
     };
-    if text.trim().is_empty() {
-        status_msg(ctx, "empty line");
+    if text.trim().is_empty() || text.trim().starts_with("--") || text.trim().starts_with('#') {
         return;
     }
-    exec_text(ctx, state, &text);
+    exec_text(ctx, state, text.trim());
 }
 
 fn handle_exec_buffer(ctx: &mut CommandContext, state: &mut AppState) {

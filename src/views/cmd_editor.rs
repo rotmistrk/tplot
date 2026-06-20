@@ -103,9 +103,38 @@ impl View for CommandEditor {
     }
 }
 
-/// Check if a string is a complete Tcl command (braces/quotes balanced).
-/// Uses rusticle's parser — if parse succeeds, the input is complete.
+/// Check if braces and quotes are balanced in Tcl input.
+/// A line ending with unmatched `{` means the command continues.
 fn is_tcl_complete(input: &str) -> bool {
-    use rusticle::parser::Parser;
-    Parser::parse(input).is_ok()
+    let mut brace_depth: i32 = 0;
+    let mut in_quote = false;
+    let mut prev_backslash = false;
+
+    for ch in input.chars() {
+        if prev_backslash {
+            prev_backslash = false;
+            continue;
+        }
+        match ch {
+            '\\' => prev_backslash = true,
+            '"' if brace_depth == 0 => in_quote = !in_quote,
+            '{' if !in_quote => brace_depth += 1,
+            '}' if !in_quote => brace_depth -= 1,
+            _ => {}
+        }
+    }
+    brace_depth <= 0 && !in_quote
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_tcl_completeness() {
+        assert!(!is_tcl_complete("sql {"));
+        assert!(!is_tcl_complete("sql {\n  select 1"));
+        assert!(is_tcl_complete("sql {\n  select 1\n}"));
+        assert!(is_tcl_complete("sql {select 1}"));
+        assert!(is_tcl_complete("select 1"));
+    }
 }
