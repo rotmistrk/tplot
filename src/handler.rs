@@ -33,7 +33,6 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     match ctx.command() {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
         CM_REPL_TAB => handle_repl_tab(ctx, state),
-        CM_EXEC_COMMAND => handle_exec_command(ctx, state),
         CM_EXEC_LINE => handle_exec_line(ctx, state),
         CM_EXEC_BUFFER => handle_exec_buffer(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
@@ -150,10 +149,15 @@ fn common_prefix(strings: &[&str]) -> String {
 fn handle_exec_line(ctx: &mut CommandContext, state: &mut AppState) {
     let text = {
         let Some(editor) = find_cmd_editor(ctx.desktop_mut()) else {
+            status_err(ctx, "cmd editor not found");
             return;
         };
         editor.current_line()
     };
+    if text.trim().is_empty() {
+        status_msg(ctx, "empty line");
+        return;
+    }
     exec_text(ctx, state, &text);
 }
 
