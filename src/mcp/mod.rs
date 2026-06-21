@@ -2,5 +2,6 @@
 
 pub mod agent_patch;
 pub mod bridge;
+pub mod commands;
 pub mod server;
 pub mod socket_path;

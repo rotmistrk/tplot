@@ -15,6 +15,8 @@ pub struct AppState {
     pub(crate) pending_delete: Option<String>,
     /// Background job manager.
     pub(crate) jobs: crate::jobs::JobManager,
+    /// MCP command queue (set after backend waker is available).
+    pub(crate) mcp_queue: Option<crate::mcp::commands::McpCommandQueue>,
 }
 
 impl AppState {
@@ -33,6 +35,7 @@ impl AppState {
             registry,
             pending_delete: None,
             jobs: crate::jobs::JobManager::new(),
+            mcp_queue: None,
         }
     }
 

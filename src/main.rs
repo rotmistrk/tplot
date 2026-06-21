@@ -32,6 +32,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use txv_core::program::Program;
+use txv_core::run::Backend;
 use txv_render::backend::CrosstermBackend;
 use txv_render::ColorMode;
 
@@ -71,7 +72,8 @@ fn main() -> Result<()> {
 
     // Start MCP socket listener
     let sock_path = socket_path(&root_dir);
-    let mcp_active = mcp::server::start_mcp_listener(&sock_path);
+    let mcp_cmd_queue: mcp::server::SharedCommandQueue = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mcp_active = mcp::server::start_mcp_listener_with_queue(&sock_path, mcp_cmd_queue.clone());
     if let Ok(ref p) = mcp_active {
         std::env::set_var("TPLOT_MCP_SOCKET", p.to_string_lossy().as_ref());
         log::info!("MCP server listening on {}", p.display());
@@ -103,6 +105,16 @@ fn main() -> Result<()> {
     }
 
     let mut backend = CrosstermBackend::new(ColorMode::TrueColor);
+
+    // Wire MCP command queue to the backend waker
+    {
+        let cq = mcp::commands::McpCommandQueue::new(backend.waker());
+        if let Ok(mut guard) = mcp_cmd_queue.lock() {
+            *guard = Some(cq.clone());
+        }
+        app_state.mcp_queue = Some(cq);
+    }
+
     program.run(&mut backend, |ctx| {
         handle_command(ctx, &mut app_state);
     });

@@ -32,6 +32,8 @@ pub fn initial_refresh(desktop: &mut dyn txv_core::prelude::View, registry: &reg
 pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
     // Poll background jobs on every command (cheap no-op if empty).
     poll_jobs(ctx, state);
+    // Drain MCP requests from the command queue.
+    drain_mcp_requests(ctx, state);
 
     match ctx.command() {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
@@ -716,6 +718,82 @@ struct SimpleSource(Vec<String>);
 impl txv_widgets::DropdownSource for SimpleSource {
     fn len(&self) -> usize { self.0.len() }
     fn label(&self, idx: usize) -> &str { &self.0[idx] }
+}
+
+
+fn drain_mcp_requests(ctx: &mut CommandContext, state: &mut AppState) {
+    let Some(ref cq) = state.mcp_queue else { return };
+    let requests = cq.drain();
+    if requests.is_empty() {
+        return;
+    }
+    for req in requests {
+        let result = handle_mcp_action(ctx, state, &req.action);
+        let _ = req.reply.send(result);
+    }
+}
+
+fn handle_mcp_action(
+    ctx: &mut CommandContext,
+    state: &mut AppState,
+    action: &crate::mcp::commands::McpAction,
+) -> Result<serde_json::Value, String> {
+    use crate::mcp::commands::McpAction;
+    match action {
+        McpAction::RunCommand { script } => {
+            match state.scripting().eval(script) {
+                Ok(result) => {
+                    let commands = state.scripting().drain_commands();
+                    let mut msgs = Vec::new();
+                    for cmd in commands {
+                        match execute_command(state, cmd, ctx.desktop_mut()) {
+                            Ok(msg) => {
+                                refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
+                                msgs.push(msg);
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    let output = if msgs.is_empty() { result } else { msgs.join("\n") };
+                    Ok(serde_json::Value::String(output))
+                }
+                Err(e) => Err(e),
+            }
+        }
+        McpAction::ListNodes => {
+            let nodes: Vec<serde_json::Value> = state.registry.nodes().iter().map(|n| {
+                serde_json::json!({
+                    "name": n.name,
+                    "icon": n.icon(),
+                    "parents": n.parents,
+                    "status": format!("{:?}", n.status),
+                })
+            }).collect();
+            Ok(serde_json::Value::Array(nodes))
+        }
+        McpAction::PreviewTable { name, limit } => {
+            let sql = format!("SELECT * FROM \"{}\" LIMIT {}", name, limit);
+            let result = state.engine().query(&sql)?;
+            let json = serde_json::json!({
+                "columns": result.columns,
+                "rows": result.rows,
+                "row_count": result.row_count,
+            });
+            Ok(json)
+        }
+        McpAction::GetEditorContent => {
+            let content = find_cmd_editor(ctx.desktop_mut())
+                .map(|e| e.content())
+                .unwrap_or_default();
+            Ok(serde_json::Value::String(content))
+        }
+        McpAction::SetEditorContent { content } => {
+            if let Some(editor) = find_cmd_editor(ctx.desktop_mut()) {
+                editor.set_content(content);
+            }
+            Ok(serde_json::Value::String("ok".into()))
+        }
+    }
 }
 
 fn poll_jobs(ctx: &mut CommandContext, state: &mut AppState) {
