@@ -37,7 +37,8 @@ pub fn build_status_bar(desktop: &TiledWorkspace) -> StatusBar {
     // M-x command line.
     let input = InputLine::new()
         .with_command(CM_EXECUTE_COMMAND)
-        .with_prefill_command(CM_COMMAND_PREFILL);
+        .with_prefill_command(CM_COMMAND_PREFILL)
+        .with_completer(Box::new(crate::cmd_completer::CmdCompleter));
     let command_line = ModalKey::new("M-x", ":")
         .trigger_key(alt('x'))
         .trigger_command(CM_COMMAND_MODE)

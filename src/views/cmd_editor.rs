@@ -23,7 +23,8 @@ pub struct CommandEditor {
 
 impl CommandEditor {
     pub fn new() -> Self {
-        let editor = EditorView::from_text("");
+        let mut editor = EditorView::from_text("");
+        editor.set_content("", "tcl");
         Self { inner: editor }
     }
 
@@ -82,6 +83,11 @@ impl CommandEditor {
     /// Set the editor content (replaces buffer).
     pub fn set_content(&mut self, text: &str) {
         self.inner.set_content(text, "tcl");
+    }
+
+    /// Get the full editor content.
+    pub fn content(&self) -> String {
+        self.inner.content()
     }
 }
 

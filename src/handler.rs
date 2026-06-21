@@ -225,6 +225,11 @@ fn find_cmd_editor(desktop: &mut dyn txv_core::prelude::View) -> Option<&mut Com
     view.as_any_mut()?.downcast_mut::<CommandEditor>()
 }
 
+/// Public accessor for session save/restore.
+pub fn find_cmd_editor_pub(desktop: &mut dyn txv_core::prelude::View) -> Option<&mut CommandEditor> {
+    find_cmd_editor(desktop)
+}
+
 fn handle_exec_command(ctx: &mut CommandContext, state: &mut AppState) {
     let text = ctx
         .data()

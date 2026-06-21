@@ -1,6 +1,7 @@
 //! tplot — Terminal Data Analysis with Lineage Tracking
 
 mod app;
+mod cmd_completer;
 mod completion_source;
 #[allow(dead_code)]
 mod completions;
@@ -18,6 +19,7 @@ mod plot;
 mod registry;
 #[allow(dead_code)]
 mod scripting;
+mod session;
 mod slots;
 mod sql_analysis;
 mod status;
@@ -82,7 +84,7 @@ fn main() -> Result<()> {
         "sidekick",
         Box::new(txv_widgets::sidekick_manager::SidekickManager::new()),
     );
-    let mut app_state = AppState::new(root_dir);
+    let mut app_state = AppState::new(root_dir.clone());
 
     // Initial lineage tree refresh from loaded registry.
     {
@@ -90,10 +92,29 @@ fn main() -> Result<()> {
         crate::handler::initial_refresh(desktop, &app_state.registry);
     }
 
+    // Restore session (editor content).
+    if let Some(sess) = session::load_session(&root_dir) {
+        if !sess.editor_content.is_empty() {
+            let desktop = program.desktop_mut();
+            if let Some(editor) = crate::handler::find_cmd_editor_pub(desktop) {
+                editor.set_content(&sess.editor_content);
+            }
+        }
+    }
+
     let mut backend = CrosstermBackend::new(ColorMode::TrueColor);
     program.run(&mut backend, |ctx| {
         handle_command(ctx, &mut app_state);
     });
+
+    // Save session on exit.
+    {
+        let desktop = program.desktop_mut();
+        let editor_content = crate::handler::find_cmd_editor_pub(desktop)
+            .map(|e| e.content())
+            .unwrap_or_default();
+        session::save_session(&root_dir, &session::SessionState { editor_content });
+    }
 
     // Cleanup socket
     if mcp_active.is_ok() {
