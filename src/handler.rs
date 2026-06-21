@@ -13,7 +13,7 @@ use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
 use crate::sql_analysis;
 use crate::status::{CM_APP_QUIT, CM_CONFIRM_ACTIVATE, CM_CONFIRM_RESPONSE, CM_EXECUTE_COMMAND, CM_SHOW_HELP};
-use crate::views::cmd_editor::{CommandEditor, CM_EXEC_BUFFER, CM_EXEC_LINE};
+use crate::views::cmd_editor::{CommandEditor, CM_EDITOR_COMPLETE, CM_EXEC_BUFFER, CM_EXEC_LINE};
 use crate::views::help::HelpView;
 use crate::views::lineage_tree::{LineageTreeView, CM_NODE_CLONE, CM_NODE_DELETE, CM_NODE_EDIT, CM_NODE_SELECT, CM_NODE_SELECT_FOCUS};
 use crate::views::plot::PlotView;
@@ -38,6 +38,7 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
         CM_REPL_TAB => handle_repl_tab(ctx, state),
         CM_EXEC_LINE => handle_exec_line(ctx, state),
         CM_EXEC_BUFFER => handle_exec_buffer(ctx, state),
+        CM_EDITOR_COMPLETE => handle_editor_complete(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
         CM_NODE_SELECT_FOCUS => {
             handle_node_select(ctx, state);
@@ -51,9 +52,32 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
             // User picked from dropdown — apply completion (String payload).
             if let Some(text) = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()) {
                 let text = text.clone();
-                if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
-                    repl.apply_completion(&text);
-                    repl.sidekick_visible = false;
+                let repl_active = find_repl_mut(ctx.desktop_mut())
+                    .map(|r| r.sidekick_visible)
+                    .unwrap_or(false);
+                if repl_active {
+                    if let Some(repl) = find_repl_mut(ctx.desktop_mut()) {
+                        repl.apply_completion(&text);
+                        repl.sidekick_visible = false;
+                    }
+                } else if let Some(editor) = find_cmd_editor(ctx.desktop_mut()) {
+                    // Replace word prefix at cursor with the selected completion
+                    let e = editor.inner.editor_mut();
+                    let line = e.cursor_line();
+                    let col = e.cursor_col();
+                    let line_text = e.buf().line(line).unwrap_or_default();
+                    let chars: Vec<char> = line_text.chars().collect();
+                    let prefix_len = chars[..col].iter().rev()
+                        .take_while(|c| c.is_alphanumeric() || **c == '_')
+                        .count();
+                    let word_start = col - prefix_len;
+                    let start_offset = e.buf().line_col_to_offset(line, word_start).unwrap_or(0);
+                    let end_offset = e.buf().line_col_to_offset(line, col).unwrap_or(start_offset);
+                    if end_offset > start_offset {
+                        e.buf().delete(start_offset, end_offset);
+                    }
+                    e.buf().insert(start_offset, &text);
+                    e.set_cursor_col(word_start + text.len());
                 }
             }
         }
@@ -649,6 +673,50 @@ fn insert_plot_tab(desktop: &mut dyn txv_core::prelude::View, name: &str, comman
     ws.insert_tab(slot, name, Box::new(PlotView::new(name, command, lines)));
 }
 
+
+
+fn handle_editor_complete(ctx: &mut CommandContext, state: &mut AppState) {
+    let prefix = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned().unwrap_or_default();
+
+    // Gather completions: commands + table names
+    let keywords = ["sql", "into", "plot", "derive", "export", "freeze", "run", "shell", "kiro"];
+    let mut items: Vec<String> = keywords.iter()
+        .filter(|k| k.starts_with(prefix.as_str()))
+        .map(|k| k.to_string())
+        .collect();
+
+    for node in state.registry.nodes() {
+        let name = &node.name;
+        if name.starts_with(prefix.as_str()) && !items.contains(name) {
+            items.push(name.clone());
+        }
+    }
+
+    if items.is_empty() {
+        return;
+    }
+
+    // Show dropdown via sidekick
+    use txv_widgets::sidekick::SidekickRequest;
+    use txv_widgets::DropdownMenu;
+
+    let source = SimpleSource(items);
+    let menu = DropdownMenu::new(source);
+    let rect = txv_core::prelude::Rect::new(0, 0, 30, 8);
+    let view_id = find_cmd_editor(ctx.desktop_mut())
+        .map(|e| txv_core::prelude::View::view_id(e))
+        .unwrap_or(0);
+    let request = SidekickRequest::new(Box::new(menu), rect, view_id);
+    ctx.sink().push_command(txv_widgets::sidekick::CM_SIDEKICK_SHOW, Some(Box::new(request)));
+}
+
+/// Simple DropdownSource from a list of strings.
+struct SimpleSource(Vec<String>);
+
+impl txv_widgets::DropdownSource for SimpleSource {
+    fn len(&self) -> usize { self.0.len() }
+    fn label(&self, idx: usize) -> &str { &self.0[idx] }
+}
 
 fn poll_jobs(ctx: &mut CommandContext, state: &mut AppState) {
     let completed = state.jobs.poll();

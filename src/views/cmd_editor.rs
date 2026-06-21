@@ -3,7 +3,8 @@
 
 use txv_core::event::CommandId;
 use txv_core::prelude::*;
-use txv_edit::view::EditorView;
+use txv_edit::editor::EditorAction;
+use txv_edit::view::{EditorView, EditorViewDelegate};
 
 /// Base for editor execution commands.
 const CM_EXEC_BASE: CommandId = txv_core::commands::CM_TXV_MAX + 200;
@@ -16,16 +17,37 @@ pub const CM_EXEC_SELECTION: CommandId = CM_EXEC_BASE + 1;
 pub const CM_EXEC_BUFFER: CommandId = CM_EXEC_BASE + 2;
 /// Re-execute last command.
 pub const CM_EXEC_LAST: CommandId = CM_EXEC_BASE + 3;
+/// Trigger completion dropdown in editor.
+pub const CM_EDITOR_COMPLETE: CommandId = CM_EXEC_BASE + 4;
+
+/// Delegate that converts Ctrl-N completion into a command.
+pub(crate) struct CmdDelegate;
+
+impl EditorViewDelegate for CmdDelegate {
+    fn on_action(&mut self, action: &EditorAction) -> bool {
+        if matches!(action, EditorAction::LspCompletion) {
+            return true; // handled — we emit CM_EDITOR_COMPLETE in on_action_post
+        }
+        false
+    }
+
+    fn on_action_post(&mut self, action: &EditorAction, _editor: &txv_edit::editor::Editor) {
+        // We can't emit commands here since we don't have access to state.
+        // Instead, mark a flag for the handle() override to pick up.
+    }
+}
 
 pub struct CommandEditor {
-    inner: EditorView,
+    pub(crate) inner: EditorView<CmdDelegate>,
+    /// Set when Ctrl-N triggers completion (picked up in handle).
+    completion_requested: bool,
 }
 
 impl CommandEditor {
     pub fn new() -> Self {
-        let mut editor = EditorView::from_text("");
+        let mut editor = EditorView::with_delegate(CmdDelegate);
         editor.set_content("", "tcl");
-        Self { inner: editor }
+        Self { inner: editor, completion_requested: false }
     }
 
     /// Get the current line text.
@@ -113,6 +135,19 @@ impl View for CommandEditor {
     }
 
     fn handle(&mut self, event: &txv_core::event::Event) -> txv_core::view::HandleResult {
+        // Check for Ctrl-N to trigger completion
+        if let txv_core::event::Event::Key(key) = event {
+            if key.modifiers().ctrl() && key.code() == txv_core::event::KeyCode::Char('n') {
+                let editor = self.inner.editor();
+                let line = editor.cursor_line();
+                let col = editor.cursor_col();
+                let text = editor.buf().line(line).unwrap_or_default();
+                let word_start = text[..col].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+                let prefix = text[word_start..col].to_string();
+                self.inner.put_command(CM_EDITOR_COMPLETE, Some(Box::new(prefix)));
+                return txv_core::view::HandleResult::Consumed;
+            }
+        }
         self.inner.handle(event)
     }
 }

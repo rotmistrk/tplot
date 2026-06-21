@@ -2628,6 +2628,7 @@ dependencies = [
  "crossterm",
  "duckdb",
  "env_logger",
+ "libc",
  "log",
  "rusticle",
  "serde",
