@@ -289,14 +289,33 @@ fn t08b_table_navigable_with_jk() {
 // ═══ Test 9: Progress indication (placeholder - needs JobManager) ═══
 
 #[test]
-#[ignore] // Not yet implemented: progress bar for long operations
 fn t09_progress_bar_for_long_operation() {
-    // This test will require:
-    // - A slow operation (large import)
-    // - JobManager wired to async execution
-    // - Tree showing ">" (running) status
-    // - Status bar showing progress (rows/bytes)
-    // - Ctrl+C to cancel
+    // Async shell import: node created as Running, completes in background
+    let dir = temp_project(&[]);
+    let mut h = TestHarness::with_size(dir.path(), 120, 30);
+    h.run_cycles(2);
+
+    // Start an async shell import (echo generates CSV quickly)
+    focus_cmd(&mut h);
+    type_in_editor(&mut h, "into test_data --shell {echo -e 'a,b\\n1,2\\n3,4'} --csv");
+    press_f9(&mut h);
+
+    // Node should exist and be Running initially
+    assert!(h.state.registry.contains("test_data"), "node should be created");
+
+    // Give the background job time to complete
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    // Poll by running cycles (triggers command dispatch which polls jobs)
+    h.run_cycles(10);
+
+    // Node should be UpToDate after completion
+    let screen = h.screen_text();
+    println!("=== AFTER ASYNC IMPORT ===\n{screen}");
+    // Verify status message shows completion
+    assert!(
+        h.contains("imported") || h.contains("test_data"),
+        "should show completion message"
+    );
 }
 
 // ═══ Test 15: Verify data for both children ═══

@@ -111,6 +111,110 @@ impl Engine {
         });
         rx
     }
+
+    /// Spawn shell import job. Returns (JobHandle, CancelToken).
+    pub(crate) fn spawn_shell_import(
+        project_dir: &Path,
+        cmd: &str,
+        table_name: &str,
+    ) -> (crate::jobs::JobHandle, crate::jobs::CancelToken) {
+        use crate::jobs::{new_cancel_token, JobHandle, Progress as JP};
+        use std::time::Instant;
+
+        let (tx, rx) = mpsc::channel();
+        let cancel = new_cancel_token();
+        let cancel_clone = cancel.clone();
+        let project_dir = project_dir.to_path_buf();
+        let cmd = cmd.to_string();
+        let table_name = table_name.to_string();
+        let node_id = table_name.clone();
+
+        thread::spawn(move || {
+            let _ = tx.send(JP::Started { task: format!("shell: {cmd}") });
+
+            // Run the shell command, capture stdout
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&cmd)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn();
+
+            let mut child = match output {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tx.send(JP::Done { result: Err(format!("spawn: {e}")) });
+                    return;
+                }
+            };
+
+            // Read stdout in chunks, write to temp file, report progress
+            use std::io::{BufRead, BufReader, Write};
+            let stdout = child.stdout.take().unwrap();
+            let reader = BufReader::new(stdout);
+
+            let tmp_path = project_dir.join(format!(".tplot/.import_{table_name}.csv"));
+            let tmp_file = match std::fs::File::create(&tmp_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = tx.send(JP::Done { result: Err(format!("tmp file: {e}")) });
+                    return;
+                }
+            };
+            let mut writer = std::io::BufWriter::new(tmp_file);
+            let mut rows: u64 = 0;
+            let mut bytes: u64 = 0;
+
+            for line in reader.lines() {
+                if cancel_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = child.kill();
+                    let _ = std::fs::remove_file(&tmp_path);
+                    let _ = tx.send(JP::Cancelled);
+                    return;
+                }
+                let line = match line {
+                    Ok(l) => l,
+                    Err(_) => break,
+                };
+                bytes += line.len() as u64 + 1;
+                let _ = writeln!(writer, "{}", line);
+                rows += 1;
+                if rows % 1000 == 0 {
+                    let _ = tx.send(JP::Update { rows_done: rows, rows_total: None, bytes_done: bytes });
+                }
+            }
+            drop(writer);
+            let _ = child.wait();
+
+            let _ = tx.send(JP::Update { rows_done: rows, rows_total: Some(rows), bytes_done: bytes });
+
+            // Load into DuckDB
+            let result = (|| -> Result<String, String> {
+                let engine = Engine::open(&project_dir)?;
+                let path_str = tmp_path.to_string_lossy();
+                let sql = format!(
+                    "CREATE OR REPLACE TABLE \"{table_name}\" AS SELECT * FROM read_csv_auto('{path_str}')"
+                );
+                engine.conn.execute_batch(&sql).map_err(|e| format!("import: {e}"))?;
+                let _ = std::fs::remove_file(&tmp_path);
+                Ok(format!("{rows} rows imported"))
+            })();
+
+            let _ = tx.send(JP::Done { result });
+        });
+
+        let handle = JobHandle {
+            node_id,
+            task: format!("shell import"),
+            rx,
+            cancel: cancel.clone(),
+            started_at: Instant::now(),
+            rows_done: 0,
+            rows_total: None,
+            bytes_done: 0,
+        };
+        (handle, cancel)
+    }
 }
 
 /// Convert an Arrow array cell to a display string.

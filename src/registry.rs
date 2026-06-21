@@ -191,6 +191,13 @@ impl Registry {
         }
     }
 
+    /// Set node status by name.
+    pub(crate) fn set_node_status(&mut self, name: &str, status: NodeStatus) {
+        if let Some(node) = self.nodes.iter_mut().find(|n| n.name == name) {
+            node.status = status;
+        }
+    }
+
     /// Clone a node and all its descendants with a new name suffix.
     /// Cloned nodes have status Empty (not materialized).
     /// Returns the list of cloned node names.

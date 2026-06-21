@@ -30,6 +30,9 @@ pub fn initial_refresh(desktop: &mut dyn txv_core::prelude::View, registry: &reg
 }
 
 pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
+    // Poll background jobs on every command (cheap no-op if empty).
+    poll_jobs(ctx, state);
+
     match ctx.command() {
         CM_REPL_SUBMIT => handle_repl_submit(ctx, state),
         CM_REPL_TAB => handle_repl_tab(ctx, state),
@@ -511,7 +514,15 @@ fn execute_command(
                 }
                 Ok(format!("Imported {count} rows → {table}"))
             }
-            crate::scripting::ImportSource::Exec(_) => Err("exec import not yet implemented".into()),
+            crate::scripting::ImportSource::Exec(cmd) => {
+                // Async: create node as Running, spawn background job
+                let full_cmd_str = format!("into {table} --shell {{{cmd}}}");
+                state.registry.add_table(&table, &full_cmd_str, "", None);
+                state.registry.set_node_status(&table, crate::node_state::NodeStatus::Running);
+                let (handle, _cancel) = crate::engine::Engine::spawn_shell_import(&state.root_dir, &cmd, &table);
+                state.jobs.register(handle);
+                Ok(format!("Started: {table} (shell import)"))
+            }
         },
         ScriptCommand::Plot {
             plot_type,
@@ -631,6 +642,27 @@ fn insert_plot_tab(desktop: &mut dyn txv_core::prelude::View, name: &str, comman
         panel.close_tab_by_title(name);
     }
     ws.insert_tab(slot, name, Box::new(PlotView::new(name, command, lines)));
+}
+
+
+fn poll_jobs(ctx: &mut CommandContext, state: &mut AppState) {
+    let completed = state.jobs.poll();
+    if completed.is_empty() {
+        return;
+    }
+    for (node_id, result) in &completed {
+        match result {
+            Ok(msg) => {
+                state.registry.set_node_status(node_id, crate::node_state::NodeStatus::UpToDate);
+                status_msg(ctx, &format!("{node_id}: {msg}"));
+            }
+            Err(e) => {
+                state.registry.set_node_status(node_id, crate::node_state::NodeStatus::Error(e.clone()));
+                status_err(ctx, &format!("{node_id}: {e}"));
+            }
+        }
+    }
+    refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
 }
 
 fn open_shell_tab(desktop: &mut dyn txv_core::prelude::View, state: &AppState) {

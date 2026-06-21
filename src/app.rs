@@ -13,6 +13,8 @@ pub struct AppState {
     pub registry: Registry,
     /// Node name pending deletion (awaiting confirmation).
     pub(crate) pending_delete: Option<String>,
+    /// Background job manager.
+    pub(crate) jobs: crate::jobs::JobManager,
 }
 
 impl AppState {
@@ -30,6 +32,7 @@ impl AppState {
             scripting,
             registry,
             pending_delete: None,
+            jobs: crate::jobs::JobManager::new(),
         }
     }
 
