@@ -123,7 +123,6 @@ impl Engine {
 
         let (tx, rx) = mpsc::channel();
         let cancel = new_cancel_token();
-        let cancel_clone = cancel.clone();
         let project_dir = project_dir.to_path_buf();
         let cmd = cmd.to_string();
         let table_name = table_name.to_string();
@@ -132,73 +131,53 @@ impl Engine {
         thread::spawn(move || {
             let _ = tx.send(JP::Started { task: format!("shell: {cmd}") });
 
-            // Run the shell command, capture stdout
-            let output = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&cmd)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn();
+            // Create a FIFO — shell writes to it, DuckDB reads directly (parallel CSV parsing)
+            let fifo_path = project_dir.join(format!(".tplot/.fifo_{table_name}"));
+            let _ = std::fs::create_dir_all(project_dir.join(".tplot"));
 
-            let mut child = match output {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = tx.send(JP::Done { result: Err(format!("spawn: {e}")) });
-                    return;
-                }
-            };
-
-            // Read stdout in chunks, write to temp file, report progress
-            use std::io::{BufRead, BufReader, Write};
-            let stdout = child.stdout.take().unwrap();
-            let reader = BufReader::new(stdout);
-
-            let tmp_path = project_dir.join(format!(".tplot/.import_{table_name}.csv"));
-            let tmp_file = match std::fs::File::create(&tmp_path) {
-                Ok(f) => f,
-                Err(e) => {
-                    let _ = tx.send(JP::Done { result: Err(format!("tmp file: {e}")) });
-                    return;
-                }
-            };
-            let mut writer = std::io::BufWriter::new(tmp_file);
-            let mut rows: u64 = 0;
-            let mut bytes: u64 = 0;
-
-            for line in reader.lines() {
-                if cancel_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                    let _ = child.kill();
-                    let _ = std::fs::remove_file(&tmp_path);
-                    let _ = tx.send(JP::Cancelled);
-                    return;
-                }
-                let line = match line {
-                    Ok(l) => l,
-                    Err(_) => break,
-                };
-                bytes += line.len() as u64 + 1;
-                let _ = writeln!(writer, "{}", line);
-                rows += 1;
-                if rows % 1000 == 0 {
-                    let _ = tx.send(JP::Update { rows_done: rows, rows_total: None, bytes_done: bytes });
-                }
+            // Clean up any stale FIFO
+            let _ = std::fs::remove_file(&fifo_path);
+            let fifo_cstr = std::ffi::CString::new(fifo_path.to_string_lossy().as_bytes().to_vec()).unwrap();
+            let rc = unsafe { libc::mkfifo(fifo_cstr.as_ptr(), 0o600) };
+            if rc != 0 {
+                let _ = tx.send(JP::Done { result: Err("mkfifo failed".into()) });
+                return;
             }
-            drop(writer);
-            let _ = child.wait();
 
-            let _ = tx.send(JP::Update { rows_done: rows, rows_total: Some(rows), bytes_done: bytes });
+            // Spawn shell → writes to FIFO
+            let shell_handle = {
+                let fifo = fifo_path.clone();
+                let cmd = cmd.clone();
+                thread::spawn(move || {
+                    // Shell writes stdout directly to the FIFO
+                    let _ = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(format!("{cmd} > {}", fifo.to_string_lossy()))
+                        .status();
+                })
+            };
 
-            // Load into DuckDB
+            // DuckDB reads from FIFO in parallel (its own thread pool for CSV parsing)
+            let fifo_str = fifo_path.to_string_lossy().to_string();
             let result = (|| -> Result<String, String> {
                 let engine = Engine::open(&project_dir)?;
-                let path_str = tmp_path.to_string_lossy();
                 let sql = format!(
-                    "CREATE OR REPLACE TABLE \"{table_name}\" AS SELECT * FROM read_csv_auto('{path_str}')"
+                    "CREATE OR REPLACE TABLE \"{table_name}\" AS SELECT * FROM read_csv_auto('{fifo_str}')"
                 );
                 engine.conn.execute_batch(&sql).map_err(|e| format!("import: {e}"))?;
-                let _ = std::fs::remove_file(&tmp_path);
-                Ok(format!("{rows} rows imported"))
+                let count = engine.conn
+                    .prepare(&format!("SELECT count(*) FROM \"{table_name}\""))
+                    .and_then(|mut s| {
+                        let mut rows = s.query([])?;
+                        let row = rows.next()?.unwrap();
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap_or(0);
+                Ok(format!("{count} rows imported"))
             })();
+
+            let _ = shell_handle.join();
+            let _ = std::fs::remove_file(&fifo_path);
 
             let _ = tx.send(JP::Done { result });
         });
