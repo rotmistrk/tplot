@@ -5,14 +5,17 @@ use txv_core::event::CommandId;
 use txv_core::prelude::*;
 use txv_edit::view::EditorView;
 
+/// Base for editor execution commands.
+const CM_EXEC_BASE: CommandId = txv_core::commands::CM_TXV_MAX + 200;
+
 /// Execute current line.
-pub const CM_EXEC_LINE: CommandId = 910;
+pub const CM_EXEC_LINE: CommandId = CM_EXEC_BASE;
 /// Execute visual selection.
-pub const CM_EXEC_SELECTION: CommandId = 911;
+pub const CM_EXEC_SELECTION: CommandId = CM_EXEC_BASE + 1;
 /// Execute entire buffer.
-pub const CM_EXEC_BUFFER: CommandId = 912;
+pub const CM_EXEC_BUFFER: CommandId = CM_EXEC_BASE + 2;
 /// Re-execute last command.
-pub const CM_EXEC_LAST: CommandId = 913;
+pub const CM_EXEC_LAST: CommandId = CM_EXEC_BASE + 3;
 
 pub struct CommandEditor {
     inner: EditorView,

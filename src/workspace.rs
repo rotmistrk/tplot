@@ -63,7 +63,6 @@ fn add_tools_tabs(ws: &mut TiledWorkspace) {
     let slot = SlotId::Tools as usize;
     let cmd = CommandEditor::new();
     ws.insert_tab(slot, "Cmd", Box::new(cmd));
-    insert(ws, slot, "Shell", "Terminal (not yet)");
     insert(ws, slot, "Messages", "Log output");
     if let Some(panel) = ws.panel_mut(slot) {
         panel.set_active(0);

@@ -41,6 +41,10 @@ pub(crate) enum ScriptCommand {
     Freeze,
     /// Re-run current node's script.
     Run,
+    /// Open a shell terminal.
+    Shell,
+    /// Launch kiro with optional agent argument.
+    Kiro { agent: Option<String> },
 }
 
 /// Source for the `into` command.

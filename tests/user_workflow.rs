@@ -368,7 +368,7 @@ fn t17_send_command_to_editor() {
     h.run_cycles(1);
 
     // Press 'e' to send command to editor
-    h.inject_key(KeyCode::Char('e'), none());
+    h.inject_key(KeyCode::Char('e'), KeyMod::ALT);
     h.run_cycles(3);
 
     // Editor should now contain the node's command
@@ -440,19 +440,101 @@ fn t20_plot_shows_command_header() {
 // ═══ Deletion and cloning (future) ═══
 
 #[test]
-#[ignore] // Not yet implemented: delete subtree
 fn t_delete_subtree() {
     // Delete a node → removes it and all children from lineage
     // Data cleaned from disk
     // Confirmation required
+    let dir = temp_project(&[]);
+    let mut h = TestHarness::with_size(dir.path(), 120, 30);
+    h.run_cycles(2);
+
+    // Create parent + child
+    focus_cmd(&mut h);
+    type_in_editor(&mut h, "sql {CREATE TABLE events AS SELECT 1 as id, 'click' as type}");
+    press_f9(&mut h);
+
+    h.inject_key(KeyCode::Char('o'), none());
+    h.run_cycles(1);
+    h.inject_str("sql -name clicks {SELECT * FROM events WHERE type='click'}");
+    h.inject_key(KeyCode::Esc, none());
+    h.run_cycles(1);
+    press_f9(&mut h);
+
+    // Verify both exist
+    focus_tree(&mut h);
+    h.run_cycles(2);
+    assert!(h.contains("events"), "parent should exist");
+    assert!(h.contains("clicks"), "child should exist");
+
+    // Navigate to 'events' node and press M-d
+    // Cursor starts on first node (events) after focus_tree
+    h.inject_key(KeyCode::Char('d'), KeyMod::ALT);
+    h.run_cycles(2);
+
+    // Confirmation prompt should appear
+    let screen = h.screen_text();
+    println!("=== CONFIRM PROMPT ===\n{screen}");
+    assert!(h.contains("Delete"), "should show delete confirmation");
+
+    // Confirm with 'y'
+    h.inject_key(KeyCode::Char('y'), none());
+    h.run_cycles(3);
+
+    // Both nodes should be gone from registry
+    assert!(!h.state.registry.contains("events"), "events should be removed from registry");
+    assert!(!h.state.registry.contains("clicks"), "clicks should be removed from registry");
+
+    // Status should confirm deletion
+    assert!(h.contains("Deleted 2"), "should report 2 nodes deleted");
+
+    // Disk files should be cleaned
+    let nodes_dir = dir.path().join("nodes");
+    assert!(!nodes_dir.join("events.tcl").exists(), "events.tcl should be deleted");
+    assert!(!nodes_dir.join("clicks.tcl").exists(), "clicks.tcl should be deleted");
 }
 
 #[test]
-#[ignore] // Not yet implemented: clone subtree
 fn t_clone_subtree() {
     // Clone a node → creates copy with new name
     // Children are cloned as Empty (not materialized)
     // Original unchanged
+    let dir = temp_project(&[]);
+    let mut h = TestHarness::with_size(dir.path(), 120, 30);
+    h.run_cycles(2);
+
+    // Create parent + child
+    focus_cmd(&mut h);
+    type_in_editor(&mut h, "sql {CREATE TABLE src AS SELECT 1 as x}");
+    press_f9(&mut h);
+
+    h.inject_key(KeyCode::Char('o'), none());
+    h.run_cycles(1);
+    h.inject_str("sql -name derived {SELECT x+1 as y FROM src}");
+    h.inject_key(KeyCode::Esc, none());
+    h.run_cycles(1);
+    press_f9(&mut h);
+
+    // Focus tree, cursor on 'src', press 'c' to clone
+    focus_tree(&mut h);
+    h.run_cycles(2);
+    h.inject_key(KeyCode::Char('c'), KeyMod::ALT);
+    h.run_cycles(3);
+
+    // Original nodes still exist
+    assert!(h.state.registry.contains("src"), "original 'src' should remain");
+    assert!(h.state.registry.contains("derived"), "original 'derived' should remain");
+
+    // Cloned nodes exist
+    assert!(h.state.registry.contains("src_copy"), "clone 'src_copy' should exist");
+    assert!(h.state.registry.contains("derived_copy"), "clone 'derived_copy' should exist");
+
+    // Status message confirms
+    assert!(h.contains("Cloned 2"), "should report 2 nodes cloned");
+
+    // Clone files persisted to disk
+    let nodes_dir = dir.path().join("nodes");
+    assert!(nodes_dir.join("src_copy.tcl").exists(), "src_copy.tcl should exist");
+    assert!(nodes_dir.join("derived_copy.tcl").exists(), "derived_copy.tcl should exist");
 }
 
 #[test]

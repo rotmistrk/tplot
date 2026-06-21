@@ -5,10 +5,13 @@ use txv_core::event::{CommandId, Event, KeyCode};
 use txv_core::prelude::*;
 use txv_core::view::HandleResult;
 
+/// Base for REPL commands.
+const CM_REPL_BASE: CommandId = txv_core::commands::CM_TXV_MAX + 50;
+
 /// Command ID emitted when user presses Enter in the REPL.
-pub(crate) const CM_REPL_SUBMIT: CommandId = 900;
+pub(crate) const CM_REPL_SUBMIT: CommandId = CM_REPL_BASE;
 /// Command ID emitted when user presses Tab in the REPL.
-pub(crate) const CM_REPL_TAB: CommandId = 902;
+pub(crate) const CM_REPL_TAB: CommandId = CM_REPL_BASE + 1;
 
 pub(crate) struct ReplView {
     state: ViewState,

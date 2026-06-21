@@ -15,7 +15,9 @@ pub fn register(interp: &mut Interpreter, commands: Arc<Mutex<Vec<ScriptCommand>
     register_derive(interp, commands.clone());
     register_export(interp, commands.clone());
     register_freeze(interp, commands.clone());
-    register_run(interp, commands);
+    register_run(interp, commands.clone());
+    register_shell(interp, commands.clone());
+    register_kiro(interp, commands);
 }
 
 fn push(cmds: &Arc<Mutex<Vec<ScriptCommand>>>, cmd: ScriptCommand) {
@@ -181,6 +183,21 @@ fn register_freeze(interp: &mut Interpreter, cmds: Arc<Mutex<Vec<ScriptCommand>>
 fn register_run(interp: &mut Interpreter, cmds: Arc<Mutex<Vec<ScriptCommand>>>) {
     interp.register_fn("run", move |_interp, _args| {
         push(&cmds, ScriptCommand::Run);
+        Ok(TclValue::from(""))
+    });
+}
+
+fn register_shell(interp: &mut Interpreter, cmds: Arc<Mutex<Vec<ScriptCommand>>>) {
+    interp.register_fn("shell", move |_interp, _args| {
+        push(&cmds, ScriptCommand::Shell);
+        Ok(TclValue::from(""))
+    });
+}
+
+fn register_kiro(interp: &mut Interpreter, cmds: Arc<Mutex<Vec<ScriptCommand>>>) {
+    interp.register_fn("kiro", move |_interp, args| {
+        let agent = args.first().map(|v| v.to_string()).filter(|s| !s.is_empty());
+        push(&cmds, ScriptCommand::Kiro { agent });
         Ok(TclValue::from(""))
     });
 }

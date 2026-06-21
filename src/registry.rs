@@ -57,12 +57,22 @@ impl Registry {
         }
     }
 
-    pub(crate) fn nodes(&self) -> &[Node] {
+    pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
 
+    /// Number of nodes in the registry.
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Check if a node with the given name exists.
+    pub fn contains(&self, name: &str) -> bool {
+        self.nodes.iter().any(|n| n.name == name)
+    }
+
     /// Find a node by name.
-    pub(crate) fn find(&self, name: &str) -> Option<&Node> {
+    pub fn find(&self, name: &str) -> Option<&Node> {
         self.nodes.iter().find(|n| n.name == name)
     }
 
@@ -179,6 +189,83 @@ impl Registry {
                 node.status = NodeStatus::Dirty;
             }
         }
+    }
+
+    /// Clone a node and all its descendants with a new name suffix.
+    /// Cloned nodes have status Empty (not materialized).
+    /// Returns the list of cloned node names.
+    pub(crate) fn clone_subtree(&mut self, name: &str, suffix: &str) -> Vec<String> {
+        // Collect the subtree in BFS order.
+        let mut to_clone = vec![name.to_string()];
+        let mut i = 0;
+        while i < to_clone.len() {
+            let parent = to_clone[i].clone();
+            for node in &self.nodes {
+                if node.parents.contains(&parent) && !to_clone.contains(&node.name) {
+                    to_clone.push(node.name.clone());
+                }
+            }
+            i += 1;
+        }
+
+        let rename = |n: &str| format!("{n}{suffix}");
+        let mut cloned_names = Vec::new();
+
+        for orig_name in &to_clone {
+            let Some(orig) = self.nodes.iter().find(|n| n.name == *orig_name) else {
+                continue;
+            };
+            let new_name = rename(orig_name);
+            let cmd = orig.command().to_string();
+            let icon = orig.icon().to_string();
+            let parents: Vec<String> = orig.parents.iter().map(|p| {
+                if to_clone.contains(p) { rename(p) } else { p.clone() }
+            }).collect();
+
+            let behavior: Box<dyn NodeBehavior> = match icon.as_str() {
+                "[T]" => Box::new(TableNode { table_name: new_name.clone(), cmd, create_sql: String::new() }),
+                "[P]" => Box::new(PlotNode { cmd, plot_type: String::new(), data_source: String::new(), columns: vec![] }),
+                _ => Box::new(QueryNode { cmd, sql: String::new() }),
+            };
+            let node = Node {
+                name: new_name.clone(),
+                parents,
+                behavior,
+                status: NodeStatus::Empty,
+                meta: NodeMeta::default(),
+            };
+            self.persist(&node);
+            self.nodes.push(node);
+            cloned_names.push(new_name);
+        }
+        cloned_names
+    }
+
+    /// Remove a node and all its descendants from the graph and disk.
+    /// Returns the list of removed node names.
+    pub(crate) fn remove_subtree(&mut self, name: &str) -> Vec<String> {
+        let mut to_remove = vec![name.to_string()];
+        // BFS to find all descendants.
+        let mut i = 0;
+        while i < to_remove.len() {
+            let parent = to_remove[i].clone();
+            for node in &self.nodes {
+                if node.parents.contains(&parent) && !to_remove.contains(&node.name) {
+                    to_remove.push(node.name.clone());
+                }
+            }
+            i += 1;
+        }
+        // Remove from disk.
+        if let Some(ref dir) = self.nodes_dir {
+            for n in &to_remove {
+                let file_name = sanitize_name(n);
+                let path = dir.join(format!("{file_name}.tcl"));
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        self.nodes.retain(|n| !to_remove.contains(&n.name));
+        to_remove
     }
 
     fn remove_by_name(&mut self, name: &str) {

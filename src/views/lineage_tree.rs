@@ -9,10 +9,20 @@ use txv_widgets::TreeTableView;
 
 use crate::lineage_data::LineageData;
 
+/// Base for lineage tree commands.
+const CM_TREE_BASE: CommandId = txv_core::commands::CM_TXV_MAX + 100;
+
 /// Emitted when user presses Enter on a lineage tree node. Payload: node name (String).
-pub(crate) const CM_NODE_SELECT: CommandId = 901;
-/// Emitted when user presses 'e' on a lineage tree node. Payload: node name (String).
-pub(crate) const CM_NODE_EDIT: CommandId = 903;
+pub(crate) const CM_NODE_SELECT: CommandId = CM_TREE_BASE;
+/// Emitted when user presses Right on a lineage tree node. Payload: node name (String).
+/// Same as select but also moves focus to center panel.
+pub(crate) const CM_NODE_SELECT_FOCUS: CommandId = CM_TREE_BASE + 1;
+/// Emitted when user presses M-e on a lineage tree node. Payload: node name (String).
+pub(crate) const CM_NODE_EDIT: CommandId = CM_TREE_BASE + 2;
+/// Emitted when user presses M-d on a lineage tree node. Payload: node name (String).
+pub(crate) const CM_NODE_DELETE: CommandId = CM_TREE_BASE + 3;
+/// Emitted when user presses M-c on a lineage tree node. Payload: node name (String).
+pub(crate) const CM_NODE_CLONE: CommandId = CM_TREE_BASE + 4;
 
 pub(crate) struct LineageTreeView {
     pub(crate) inner: TreeTableView<LineageData>,
@@ -46,15 +56,30 @@ impl View for LineageTreeView {
             let cursor = self.inner.cursor();
             let data = self.inner.data();
             if cursor < data.visible_count() {
-                match key.code() {
-                    KeyCode::Enter => {
+                match (key.code(), key.modifiers()) {
+                    (KeyCode::Enter, _) => {
                         let name = data.label(cursor).to_string();
                         self.inner.state_mut().put_command(CM_NODE_SELECT, Some(Box::new(name)));
                         return HandleResult::Consumed;
                     }
-                    KeyCode::Char('e') => {
+                    (KeyCode::Right, _) => {
+                        let name = data.label(cursor).to_string();
+                        self.inner.state_mut().put_command(CM_NODE_SELECT_FOCUS, Some(Box::new(name)));
+                        return HandleResult::Consumed;
+                    }
+                    (KeyCode::Char('e'), m) if m.alt() => {
                         let name = data.label(cursor).to_string();
                         self.inner.state_mut().put_command(CM_NODE_EDIT, Some(Box::new(name)));
+                        return HandleResult::Consumed;
+                    }
+                    (KeyCode::Char('d'), m) if m.alt() => {
+                        let name = data.label(cursor).to_string();
+                        self.inner.state_mut().put_command(CM_NODE_DELETE, Some(Box::new(name)));
+                        return HandleResult::Consumed;
+                    }
+                    (KeyCode::Char('c'), m) if m.alt() => {
+                        let name = data.label(cursor).to_string();
+                        self.inner.state_mut().put_command(CM_NODE_CLONE, Some(Box::new(name)));
                         return HandleResult::Consumed;
                     }
                     _ => {}

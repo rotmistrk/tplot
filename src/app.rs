@@ -7,11 +7,12 @@ use crate::registry::Registry;
 use crate::scripting::ScriptEngine;
 
 pub struct AppState {
-    #[allow(dead_code)]
-    root_dir: PathBuf,
+    pub(crate) root_dir: PathBuf,
     engine: Engine,
     scripting: ScriptEngine,
     pub registry: Registry,
+    /// Node name pending deletion (awaiting confirmation).
+    pub(crate) pending_delete: Option<String>,
 }
 
 impl AppState {
@@ -28,6 +29,7 @@ impl AppState {
             engine,
             scripting,
             registry,
+            pending_delete: None,
         }
     }
 

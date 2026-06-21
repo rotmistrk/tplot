@@ -4,11 +4,24 @@ use txv_core::event::{CommandId, KeyCode, KeyEvent, KeyMod};
 use txv_core::status_bar::{StatusBar, StatusSlot};
 use txv_widgets::tiled_workspace::commands::{CM_TW_FOCUS_PANEL, CM_TW_LAYOUT_CYCLE, CM_TW_TAB_CLOSE, CM_TW_ZOOM};
 use txv_widgets::tiled_workspace::TiledWorkspace;
-use txv_widgets::{KeyLabelView, MessageView};
+use txv_widgets::{ConfirmView, InputLine, KeyLabelView, MessageView, ModalKey};
+
+/// Base for tplot application commands (above txv-widgets range).
+const CM_APP_BASE: CommandId = txv_core::commands::CM_TXV_MAX + 1;
 
 /// Application command IDs.
-pub(crate) const CM_APP_QUIT: CommandId = 800;
-pub(crate) const CM_SHOW_HELP: CommandId = 801;
+pub(crate) const CM_APP_QUIT: CommandId = CM_APP_BASE;
+pub(crate) const CM_SHOW_HELP: CommandId = CM_APP_BASE + 1;
+/// Activate confirmation dialog. Payload: prompt String.
+pub(crate) const CM_CONFIRM_ACTIVATE: CommandId = CM_APP_BASE + 2;
+/// Confirmation response. Payload: char ('y'/'n'/'c').
+pub(crate) const CM_CONFIRM_RESPONSE: CommandId = CM_APP_BASE + 3;
+/// M-x command submitted. Payload: String.
+pub(crate) const CM_EXECUTE_COMMAND: CommandId = CM_APP_BASE + 4;
+/// Enter command mode programmatically.
+pub(crate) const CM_COMMAND_MODE: CommandId = CM_APP_BASE + 5;
+/// Prefill command line. Payload: String.
+pub(crate) const CM_COMMAND_PREFILL: CommandId = CM_APP_BASE + 6;
 
 pub fn build_status_bar(desktop: &TiledWorkspace) -> StatusBar {
     let mut bar = StatusBar::new();
@@ -20,6 +33,21 @@ pub fn build_status_bar(desktop: &TiledWorkspace) -> StatusBar {
 
     // Visible app bindings.
     add_visible_bindings(&mut bar);
+
+    // M-x command line.
+    let input = InputLine::new()
+        .with_command(CM_EXECUTE_COMMAND)
+        .with_prefill_command(CM_COMMAND_PREFILL);
+    let command_line = ModalKey::new("M-x", ":")
+        .trigger_key(alt('x'))
+        .trigger_command(CM_COMMAND_MODE)
+        .prefill_command(CM_COMMAND_PREFILL)
+        .terminal_command(CM_EXECUTE_COMMAND)
+        .add_child(Box::new(input));
+    bar.add(StatusSlot::new(Box::new(command_line)).priority(9).stretch(1));
+
+    // Confirm dialog (y/n prompt).
+    bar.add(StatusSlot::new(Box::new(ConfirmView::new(CM_CONFIRM_ACTIVATE, CM_CONFIRM_RESPONSE))).priority(10));
 
     // Message display (shows info/warn/error with timeout).
     bar.add(StatusSlot::new(Box::new(MessageView::new(5))).priority(8).stretch(1));

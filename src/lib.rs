@@ -8,6 +8,7 @@ pub mod handler;
 pub mod help;
 pub mod jobs;
 pub mod lineage_data;
+pub mod mcp;
 pub mod node_behavior;
 pub mod node_state;
 pub mod plot;

@@ -12,10 +12,10 @@ use crate::registry;
 use crate::scripting::ScriptCommand;
 use crate::slots::SlotId;
 use crate::sql_analysis;
-use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
+use crate::status::{CM_APP_QUIT, CM_CONFIRM_ACTIVATE, CM_CONFIRM_RESPONSE, CM_EXECUTE_COMMAND, CM_SHOW_HELP};
 use crate::views::cmd_editor::{CommandEditor, CM_EXEC_BUFFER, CM_EXEC_LINE};
 use crate::views::help::HelpView;
-use crate::views::lineage_tree::{LineageTreeView, CM_NODE_EDIT, CM_NODE_SELECT};
+use crate::views::lineage_tree::{LineageTreeView, CM_NODE_CLONE, CM_NODE_DELETE, CM_NODE_EDIT, CM_NODE_SELECT, CM_NODE_SELECT_FOCUS};
 use crate::views::plot::PlotView;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT, CM_REPL_TAB};
 use crate::views::table::TableView;
@@ -36,7 +36,14 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
         CM_EXEC_LINE => handle_exec_line(ctx, state),
         CM_EXEC_BUFFER => handle_exec_buffer(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
+        CM_NODE_SELECT_FOCUS => {
+            handle_node_select(ctx, state);
+            ctx.sink().push_command(txv_widgets::tiled_workspace::commands::CM_TW_FOCUS_PANEL, Some(Box::new(SlotId::Center as usize)));
+        }
         CM_NODE_EDIT => handle_node_edit(ctx, state),
+        CM_NODE_DELETE => handle_node_delete(ctx, state),
+        CM_NODE_CLONE => handle_node_clone(ctx, state),
+        CM_CONFIRM_RESPONSE => handle_confirm_response(ctx, state),
         CM_SIDEKICK_RESULT => {
             // User picked from dropdown — apply completion (String payload).
             if let Some(text) = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()) {
@@ -84,6 +91,7 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
                 ws.insert_tab(SlotId::Center as usize, "Help", Box::new(HelpView::new()));
             }
         }
+        CM_EXECUTE_COMMAND => handle_mx_command(ctx, state),
         _ => {}
     }
 }
@@ -260,6 +268,113 @@ fn handle_node_edit(ctx: &mut CommandContext, state: &mut AppState) {
     }
 }
 
+fn handle_node_delete(ctx: &mut CommandContext, state: &mut AppState) {
+    let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
+    let Some(node_name) = name else { return };
+    if state.registry.find(&node_name).is_none() {
+        return;
+    }
+    state.pending_delete = Some(node_name.clone());
+    let prompt = format!("Delete '{node_name}' and children?");
+    ctx.sink().push_command(CM_CONFIRM_ACTIVATE, Some(Box::new(prompt)));
+}
+
+fn handle_confirm_response(ctx: &mut CommandContext, state: &mut AppState) {
+    let ch = ctx.data().as_ref().and_then(|d| d.downcast_ref::<char>()).copied();
+    let Some(node_name) = state.pending_delete.take() else { return };
+    if ch == Some('y') {
+        let removed = state.registry.remove_subtree(&node_name);
+        refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
+        status_msg(ctx, &format!("Deleted {} node(s): {}", removed.len(), removed.join(", ")));
+    } else {
+        status_msg(ctx, "Delete cancelled");
+    }
+}
+
+fn handle_node_clone(ctx: &mut CommandContext, state: &mut AppState) {
+    let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
+    let Some(node_name) = name else { return };
+    if state.registry.find(&node_name).is_none() {
+        return;
+    }
+    let cloned = state.registry.clone_subtree(&node_name, "_copy");
+    refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
+    status_msg(ctx, &format!("Cloned {} node(s): {}", cloned.len(), cloned.join(", ")));
+}
+
+fn handle_mx_command(ctx: &mut CommandContext, state: &mut AppState) {
+    let text = match ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()) {
+        Some(t) => t.clone(),
+        None => return,
+    };
+    let trimmed = text.trim().strip_prefix(':').unwrap_or(text.trim());
+    let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
+    let cmd = parts.first().copied().unwrap_or("");
+    let arg = parts.get(1).copied().unwrap_or("");
+
+    match cmd {
+        "shell" => {
+            open_shell_tab(ctx.desktop_mut(), state);
+            status_msg(ctx, "Shell opened");
+        }
+        "kiro" => {
+            handle_mx_kiro(ctx, state, arg);
+        }
+        "help" => {
+            if let Some(ws) = ctx.desktop_mut().as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) {
+                ws.insert_tab(SlotId::Center as usize, "Help", Box::new(HelpView::new()));
+            }
+        }
+        "quit" | "q" => {
+            ctx.sink().push_command(txv_core::commands::CM_QUIT, None);
+        }
+        _ => {
+            // Fall through to Tcl eval
+            match state.scripting().eval(trimmed) {
+                Ok(result) => {
+                    let commands = state.scripting().drain_commands();
+                    let had_commands = !commands.is_empty();
+                    for c in commands {
+                        match execute_command(state, c, ctx.desktop_mut()) {
+                            Ok(msg) => {
+                                refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
+                                if !msg.is_empty() {
+                                    status_msg(ctx, &msg);
+                                }
+                            }
+                            Err(e) => status_err(ctx, &e),
+                        }
+                    }
+                    if !had_commands && !result.is_empty() {
+                        status_msg(ctx, &result);
+                    }
+                }
+                Err(e) => status_err(ctx, &format!("Unknown: {e}")),
+            }
+        }
+    }
+}
+
+fn handle_mx_kiro(ctx: &mut CommandContext, state: &mut AppState, arg: &str) {
+    let args: Vec<&str> = arg.split_whitespace().collect();
+    let agent = extract_agent_arg(&args);
+    let extra: Vec<&str> = args.iter().copied().filter(|a| !a.starts_with("--agent")).collect();
+    open_kiro_tab(ctx.desktop_mut(), state, agent, &extra);
+    status_msg(ctx, "Kiro launched");
+}
+
+fn extract_agent_arg<'a>(args: &'a [&str]) -> Option<&'a str> {
+    for (i, arg) in args.iter().enumerate() {
+        if let Some(name) = arg.strip_prefix("--agent=") {
+            return Some(name);
+        }
+        if *arg == "--agent" {
+            return args.get(i + 1).copied();
+        }
+    }
+    None
+}
+
 fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
     let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
     let Some(node_name) = name else { return };
@@ -433,6 +548,14 @@ fn execute_command(
         ScriptCommand::Run => Ok("Run: not yet implemented".into()),
         ScriptCommand::Export { .. } => Ok("Export: not yet implemented".into()),
         ScriptCommand::Budget { .. } => Ok("Budget: not yet implemented".into()),
+        ScriptCommand::Shell => {
+            open_shell_tab(desktop, state);
+            Ok("Shell opened".into())
+        }
+        ScriptCommand::Kiro { agent } => {
+            open_kiro_tab(desktop, state, agent.as_deref(), &[]);
+            Ok("Kiro launched".into())
+        }
     }
 }
 
@@ -508,6 +631,85 @@ fn insert_plot_tab(desktop: &mut dyn txv_core::prelude::View, name: &str, comman
         panel.close_tab_by_title(name);
     }
     ws.insert_tab(slot, name, Box::new(PlotView::new(name, command, lines)));
+}
+
+fn open_shell_tab(desktop: &mut dyn txv_core::prelude::View, state: &AppState) {
+    let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
+        return;
+    };
+    let slot = SlotId::Tools as usize;
+    let term = new_shell_terminal(&state.root_dir);
+    ws.insert_tab(slot, "Shell", term);
+    if let Some(panel) = ws.panel_mut(slot) {
+        let count = panel.tab_count();
+        panel.set_active(count.saturating_sub(1));
+    }
+}
+
+fn open_kiro_tab(desktop: &mut dyn txv_core::prelude::View, state: &AppState, agent: Option<&str>, extra_args: &[&str]) {
+    let agent_name = agent.unwrap_or("tplot");
+    let patched_agent = match crate::mcp::agent_patch::ensure_agent_patched(&state.root_dir, agent_name) {
+        Ok(name) => name,
+        Err(e) => {
+            log::error!("kiro agent patch failed: {e}");
+            return;
+        }
+    };
+
+    let argv = build_kiro_argv(&patched_agent, extra_args);
+    let Some(ws) = desktop.as_any_mut().and_then(|a| a.downcast_mut::<TiledWorkspace>()) else {
+        return;
+    };
+    let slot = SlotId::Tools as usize;
+    let term = new_kiro_terminal(&argv, &state.root_dir);
+    ws.insert_tab(slot, "Kiro", term);
+    if let Some(panel) = ws.panel_mut(slot) {
+        let count = panel.tab_count();
+        panel.set_active(count.saturating_sub(1));
+    }
+}
+
+fn build_kiro_argv(agent: &str, extra_args: &[&str]) -> Vec<String> {
+    let mut argv = vec!["kiro-cli".to_string(), "chat".to_string(), format!("--agent={agent}")];
+    argv.extend(extra_args.iter().filter(|a| !a.starts_with("--agent")).map(|s| s.to_string()));
+    argv
+}
+
+fn new_shell_terminal(_cwd: &std::path::Path) -> Box<dyn txv_core::prelude::View> {
+    if std::env::var("TPLOT_TEST").is_ok() {
+        return Box::new(crate::views::placeholder::PlaceholderView::new("Shell"));
+    }
+    match txv_widgets::PtyTerminal::spawn_shell(80, 24) {
+        Ok(term) => Box::new(term),
+        Err(e) => {
+            log::error!("Shell spawn failed: {e}");
+            Box::new(crate::views::placeholder::PlaceholderView::new("Shell (failed)"))
+        }
+    }
+}
+
+fn new_kiro_terminal(argv: &[String], cwd: &std::path::Path) -> Box<dyn txv_core::prelude::View> {
+    if std::env::var("TPLOT_TEST").is_ok() {
+        return Box::new(crate::views::placeholder::PlaceholderView::new("Kiro"));
+    }
+    let (program, args) = match argv.split_first() {
+        Some((p, a)) => (p.as_str(), a),
+        None => return Box::new(crate::views::placeholder::PlaceholderView::new("Kiro (failed)")),
+    };
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let socket_val = std::env::var("TPLOT_MCP_SOCKET").unwrap_or_default();
+    let envs: Vec<(&str, &str)> = if socket_val.is_empty() {
+        vec![]
+    } else {
+        vec![("TPLOT_MCP_SOCKET", &socket_val)]
+    };
+    match txv_widgets::PtyTerminal::spawn_command_with_env(program, &arg_refs, cwd, 80, 24, &envs) {
+        Ok(term) => Box::new(term),
+        Err(e) => {
+            log::error!("Kiro spawn failed: {e}");
+            Box::new(crate::views::placeholder::PlaceholderView::new("Kiro (failed)"))
+        }
+    }
 }
 
 #[cfg(test)]
