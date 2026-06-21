@@ -353,11 +353,33 @@ fn t15_both_children_show_correct_data() {
 // ═══ Test 17: Send node command to cmd buffer ═══
 
 #[test]
-#[ignore] // Not yet implemented: copy command from node to editor
 fn t17_send_command_to_editor() {
-    // When a node is selected in lineage, pressing a key (e.g., 'e')
-    // should copy the node's command to the cmd editor for editing.
-    // This allows modifying and re-running queries.
+    let dir = temp_project(&[]);
+    let mut h = TestHarness::with_size(dir.path(), 120, 30);
+    h.run_cycles(2);
+
+    focus_cmd(&mut h);
+    type_in_editor(&mut h, "sql -name q1 {SELECT 'test_value' as col}");
+    press_f9(&mut h);
+
+    // Select the node from tree
+    focus_tree(&mut h);
+    h.inject_key(KeyCode::Char('j'), none()); // navigate to q1
+    h.run_cycles(1);
+
+    // Press 'e' to send command to editor
+    h.inject_key(KeyCode::Char('e'), none());
+    h.run_cycles(3);
+
+    // Editor should now contain the node's command
+    focus_cmd(&mut h);
+    h.run_cycles(2);
+    let screen = h.screen_text();
+    println!("=== AFTER SEND TO EDITOR ===\n{screen}");
+    assert!(
+        h.contains("SELECT 'test_value'"),
+        "editor should contain the node's SQL command"
+    );
 }
 
 // ═══ Tests 19-20: Plot details ═══
@@ -445,9 +467,35 @@ fn t_shared_child_deletion() {
 // ═══ Multi-source queries (future) ═══
 
 #[test]
-#[ignore] // Not yet implemented: join from multiple sources
 fn t_multi_source_join() {
-    // sql -name joined {SELECT * FROM table_a JOIN table_b ON ...}
-    // Should create node 'joined' with TWO parents: table_a, table_b
-    // Lineage tree shows it under primary parent with link to secondary
+    let dir = temp_project(&[]);
+    let mut h = TestHarness::with_size(dir.path(), 120, 30);
+    h.run_cycles(2);
+
+    focus_cmd(&mut h);
+    type_in_editor(&mut h, "sql {CREATE TABLE users AS SELECT 1 as id, 'alice' as name}");
+    press_f9(&mut h);
+
+    h.inject_key(KeyCode::Char('o'), none());
+    h.run_cycles(1);
+    h.inject_str("sql {CREATE TABLE orders AS SELECT 1 as user_id, 'book' as item}");
+    h.inject_key(KeyCode::Esc, none());
+    h.run_cycles(1);
+    press_f9(&mut h);
+
+    h.inject_key(KeyCode::Char('o'), none());
+    h.run_cycles(1);
+    h.inject_str("sql -name joined {SELECT * FROM users JOIN orders ON users.id = orders.user_id}");
+    h.inject_key(KeyCode::Esc, none());
+    h.run_cycles(1);
+    press_f9(&mut h);
+
+    // Check lineage: 'joined' should exist
+    focus_tree(&mut h);
+    h.run_cycles(2);
+    let screen = h.screen_text();
+    println!("=== MULTI SOURCE ===\n{screen}");
+    assert!(h.contains("joined"), "joined node should exist in lineage");
+    assert!(h.contains("users"), "users should exist");
+    assert!(h.contains("orders"), "orders should exist");
 }

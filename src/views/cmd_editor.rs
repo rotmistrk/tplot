@@ -75,6 +75,11 @@ impl CommandEditor {
     pub fn buffer_content(&self) -> String {
         self.inner.content()
     }
+
+    /// Set the editor content (replaces buffer).
+    pub fn set_content(&mut self, text: &str) {
+        self.inner.set_content(text, "tcl");
+    }
 }
 
 impl Default for CommandEditor {

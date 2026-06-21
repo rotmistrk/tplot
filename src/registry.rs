@@ -114,6 +114,42 @@ impl Registry {
         self.nodes.push(node);
     }
 
+    /// Add a query node with multiple parents (e.g., JOIN).
+    pub(crate) fn add_query_multi(
+        &mut self,
+        name: &str,
+        cmd: &str,
+        sql: &str,
+        parent_tables: &[String],
+        row_count: Option<u64>,
+    ) {
+        self.remove_by_name(name);
+        let behavior = Box::new(QueryNode {
+            cmd: cmd.to_string(),
+            sql: sql.to_string(),
+        });
+        let meta = NodeMeta {
+            row_count,
+            last_run_at: Some(SystemTime::now()),
+            ..NodeMeta::default()
+        };
+        // Only include parents that exist as nodes in the registry.
+        let parents: Vec<String> = parent_tables
+            .iter()
+            .filter(|p| self.nodes.iter().any(|n| n.name == **p))
+            .cloned()
+            .collect();
+        let node = Node {
+            name: name.to_string(),
+            parents,
+            behavior,
+            status: NodeStatus::UpToDate,
+            meta,
+        };
+        self.persist(&node);
+        self.nodes.push(node);
+    }
+
     /// Add a plot node.
     pub(crate) fn add_plot(&mut self, name: &str, cmd: &str, plot_type: &str, data_source: &str, columns: &[String]) {
         self.remove_by_name(name);

@@ -15,7 +15,7 @@ use crate::sql_analysis;
 use crate::status::{CM_APP_QUIT, CM_SHOW_HELP};
 use crate::views::cmd_editor::{CommandEditor, CM_EXEC_BUFFER, CM_EXEC_LINE};
 use crate::views::help::HelpView;
-use crate::views::lineage_tree::{LineageTreeView, CM_NODE_SELECT};
+use crate::views::lineage_tree::{LineageTreeView, CM_NODE_EDIT, CM_NODE_SELECT};
 use crate::views::plot::PlotView;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT, CM_REPL_TAB};
 use crate::views::table::TableView;
@@ -36,6 +36,7 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
         CM_EXEC_LINE => handle_exec_line(ctx, state),
         CM_EXEC_BUFFER => handle_exec_buffer(ctx, state),
         CM_NODE_SELECT => handle_node_select(ctx, state),
+        CM_NODE_EDIT => handle_node_edit(ctx, state),
         CM_SIDEKICK_RESULT => {
             // User picked from dropdown — apply completion (String payload).
             if let Some(text) = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()) {
@@ -246,6 +247,19 @@ fn handle_exec_command(ctx: &mut CommandContext, state: &mut AppState) {
     refresh_lineage_tree(ctx.desktop_mut(), &state.registry);
 }
 
+fn handle_node_edit(ctx: &mut CommandContext, state: &mut AppState) {
+    let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
+    let Some(node_name) = name else { return };
+    let Some(node) = state.registry.find(&node_name) else {
+        return;
+    };
+    let command = node.command().to_string();
+
+    if let Some(editor) = find_cmd_editor(ctx.desktop_mut()) {
+        editor.set_content(&command);
+    }
+}
+
 fn handle_node_select(ctx: &mut CommandContext, state: &mut AppState) {
     let name = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()).cloned();
     let Some(node_name) = name else { return };
@@ -347,15 +361,11 @@ fn execute_command(
                     .add_table(&table_name, &format!("sql {{{query}}}"), &query, None);
             } else if let Some(tab_name) = var_name {
                 // Named query: register node + create view.
-                let parent = sql_analysis::detect_parent_table(&query);
+                let parents = sql_analysis::extract_table_refs(&query);
                 let full_cmd = format!("sql -name {tab_name} {{{query}}}");
-                state.registry.add_query(
-                    &tab_name,
-                    &full_cmd,
-                    &query,
-                    parent.as_deref(),
-                    Some(result.row_count as u64),
-                );
+                state
+                    .registry
+                    .add_query_multi(&tab_name, &full_cmd, &query, &parents, Some(result.row_count as u64));
                 let _ = state
                     .engine()
                     .query(&format!("CREATE OR REPLACE VIEW \"{tab_name}\" AS {query}"));
@@ -414,11 +424,9 @@ fn execute_command(
             }
         }
         ScriptCommand::Derive { name, sql } => {
-            let parent = sql_analysis::detect_parent_table(&sql);
+            let parents = sql_analysis::extract_table_refs(&sql);
             let full_cmd = format!("derive {name} {{{sql}}}");
-            state
-                .registry
-                .add_query(&name, &full_cmd, &sql, parent.as_deref(), None);
+            state.registry.add_query_multi(&name, &full_cmd, &sql, &parents, None);
             Ok(format!("Created node: {name}"))
         }
         ScriptCommand::Freeze => Ok("Freeze: not yet implemented".into()),

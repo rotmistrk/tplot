@@ -11,6 +11,8 @@ use crate::lineage_data::LineageData;
 
 /// Emitted when user presses Enter on a lineage tree node. Payload: node name (String).
 pub(crate) const CM_NODE_SELECT: CommandId = 901;
+/// Emitted when user presses 'e' on a lineage tree node. Payload: node name (String).
+pub(crate) const CM_NODE_EDIT: CommandId = 903;
 
 pub(crate) struct LineageTreeView {
     pub(crate) inner: TreeTableView<LineageData>,
@@ -40,15 +42,22 @@ impl View for LineageTreeView {
     }
 
     fn handle(&mut self, event: &Event) -> HandleResult {
-        // Intercept Enter to ALWAYS emit CM_NODE_SELECT (never expand/collapse).
         if let Event::Key(key) = event {
-            if key.code() == KeyCode::Enter {
-                let cursor = self.inner.cursor();
-                let data = self.inner.data();
-                if cursor < data.visible_count() {
-                    let name = data.label(cursor).to_string();
-                    self.inner.state_mut().put_command(CM_NODE_SELECT, Some(Box::new(name)));
-                    return HandleResult::Consumed;
+            let cursor = self.inner.cursor();
+            let data = self.inner.data();
+            if cursor < data.visible_count() {
+                match key.code() {
+                    KeyCode::Enter => {
+                        let name = data.label(cursor).to_string();
+                        self.inner.state_mut().put_command(CM_NODE_SELECT, Some(Box::new(name)));
+                        return HandleResult::Consumed;
+                    }
+                    KeyCode::Char('e') => {
+                        let name = data.label(cursor).to_string();
+                        self.inner.state_mut().put_command(CM_NODE_EDIT, Some(Box::new(name)));
+                        return HandleResult::Consumed;
+                    }
+                    _ => {}
                 }
             }
         }
