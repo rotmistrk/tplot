@@ -20,20 +20,155 @@ pub const CM_EXEC_LAST: CommandId = CM_EXEC_BASE + 3;
 /// Trigger completion dropdown in editor.
 pub const CM_EDITOR_COMPLETE: CommandId = CM_EXEC_BASE + 4;
 
-/// Delegate that converts Ctrl-N completion into a command.
-pub(crate) struct CmdDelegate;
+/// Delegate that provides completion trigger and embedded syntax highlighting.
+pub(crate) struct CmdDelegate {
+    /// Per-line style overrides: (col, style) pairs for embedded language spans.
+    line_styles: Vec<Vec<(usize, Style)>>,
+    highlighter: txv_edit::highlight::Highlighter,
+}
 
-impl EditorViewDelegate for CmdDelegate {
-    fn on_action(&mut self, action: &EditorAction) -> bool {
-        if matches!(action, EditorAction::LspCompletion) {
-            return true; // handled — we emit CM_EDITOR_COMPLETE in on_action_post
+impl CmdDelegate {
+    fn new() -> Self {
+        Self {
+            line_styles: Vec::new(),
+            highlighter: txv_edit::highlight::Highlighter::new(),
         }
-        false
     }
 
-    fn on_action_post(&mut self, action: &EditorAction, _editor: &txv_edit::editor::Editor) {
-        // We can't emit commands here since we don't have access to state.
-        // Instead, mark a flag for the handle() override to pick up.
+    /// Rebuild highlighting for all lines.
+    pub(crate) fn rehighlight(&mut self, content: &str) {
+        self.line_styles.clear();
+        // Track brace depth and language across lines for multi-line support
+        let mut brace_depth: i32 = 0;
+        let mut current_lang: Option<&'static str> = None;
+        let mut brace_start_col: usize = 0;
+
+        for line in content.lines() {
+            let mut styles: Vec<(usize, Style)> = Vec::new();
+            let chars: Vec<char> = line.chars().collect();
+            let mut col = 0;
+
+            // If we're continuing inside a brace from previous line, highlight whole line
+            if brace_depth > 0 {
+                if let Some(lang) = current_lang {
+                    // Find where brace closes on this line
+                    let close_col = find_brace_close(&chars, 0, &mut brace_depth);
+                    let end = close_col.unwrap_or(chars.len());
+                    let content_str: String = chars[..end].iter().collect();
+                    self.highlight_span(&content_str, lang, 0, &mut styles);
+                    if close_col.is_some() {
+                        current_lang = None;
+                    }
+                    col = end;
+                }
+            }
+
+            // Scan for new brace openings on this line
+            while col < chars.len() {
+                if chars[col] == '{' && brace_depth == 0 {
+                    // Detect language from what precedes the brace
+                    let lang = detect_language(line, col);
+                    brace_depth = 1;
+                    brace_start_col = col + 1;
+                    current_lang = lang;
+                    let close_col = find_brace_close(&chars, col + 1, &mut brace_depth);
+                    let end = close_col.unwrap_or(chars.len());
+                    if let Some(lang) = current_lang {
+                        let content_str: String = chars[brace_start_col..end].iter().collect();
+                        self.highlight_span(&content_str, lang, brace_start_col, &mut styles);
+                    }
+                    if close_col.is_some() {
+                        current_lang = None;
+                    }
+                    col = end + 1;
+                } else {
+                    if chars[col] == '{' {
+                        brace_depth += 1;
+                    } else if chars[col] == '}' {
+                        brace_depth -= 1;
+                        if brace_depth == 0 {
+                            current_lang = None;
+                        }
+                    }
+                    col += 1;
+                }
+            }
+
+            self.line_styles.push(styles);
+        }
+    }
+
+    fn highlight_span(&self, text: &str, ext: &str, offset: usize, styles: &mut Vec<(usize, Style)>) {
+        let spans = self.highlighter.highlight_line(text, ext);
+        let mut col = offset;
+        for span in &spans {
+            let s = span.style();
+            if s.fg() != txv_core::prelude::Style::default().fg() {
+                for _ in span.text().chars() {
+                    styles.push((col, s));
+                    col += 1;
+                }
+            } else {
+                col += span.text().chars().count();
+            }
+        }
+    }
+}
+
+/// Find the matching close brace, tracking nested braces. Returns col of '}' or None.
+fn find_brace_close(chars: &[char], start: usize, depth: &mut i32) -> Option<usize> {
+    for i in start..chars.len() {
+        match chars[i] {
+            '{' => *depth += 1,
+            '}' => {
+                *depth -= 1;
+                if *depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Detect embedded language from what precedes the opening brace.
+fn detect_language(line: &str, brace_col: usize) -> Option<&'static str> {
+    let before = line[..brace_col].trim_end();
+    if before.ends_with("sql") || before.ends_with("-name") || before.contains("sql ") {
+        return Some("sql");
+    }
+    if before.ends_with("--shell") || before.ends_with("exec") {
+        return Some("sh");
+    }
+    if before.ends_with("plot") {
+        return Some("gnuplot");
+    }
+    // Default for bare braces after sql command
+    if before.starts_with("sql") || before.starts_with("derive") {
+        return Some("sql");
+    }
+    None
+}
+
+impl EditorViewDelegate for CmdDelegate {
+    fn extra_style(&self, line: usize, col: usize) -> Option<Style> {
+        let line_styles = self.line_styles.get(line)?;
+        // Binary search or linear scan (lines are typically short)
+        for &(c, s) in line_styles {
+            if c == col {
+                return Some(s);
+            }
+        }
+        None
+    }
+
+    fn on_action(&mut self, action: &EditorAction) -> bool {
+        matches!(action, EditorAction::LspCompletion)
+    }
+
+    fn needs_redraw(&self, _editor: &txv_edit::editor::Editor) -> bool {
+        false
     }
 }
 
@@ -45,7 +180,7 @@ pub struct CommandEditor {
 
 impl CommandEditor {
     pub fn new() -> Self {
-        let mut editor = EditorView::with_delegate(CmdDelegate);
+        let mut editor = EditorView::with_delegate(CmdDelegate::new());
         editor.set_content("", "tcl");
         Self { inner: editor, completion_requested: false }
     }
@@ -105,6 +240,7 @@ impl CommandEditor {
     /// Set the editor content (replaces buffer).
     pub fn set_content(&mut self, text: &str) {
         self.inner.set_content(text, "tcl");
+        self.inner.delegate_mut().rehighlight(text);
     }
 
     /// Get the full editor content.
@@ -148,7 +284,13 @@ impl View for CommandEditor {
                 return txv_core::view::HandleResult::Consumed;
             }
         }
-        self.inner.handle(event)
+        let result = self.inner.handle(event);
+        // Rehighlight on any key (content may have changed)
+        if matches!(event, txv_core::event::Event::Key(_)) {
+            let content = self.inner.content();
+            self.inner.delegate_mut().rehighlight(&content);
+        }
+        result
     }
 }
 
