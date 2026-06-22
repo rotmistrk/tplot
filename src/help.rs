@@ -1,81 +1,116 @@
-//! Help text — comprehensive command reference with examples.
-//! Updated on each coding iteration. ✓ = implemented, ○ = planned.
+//! Help text — comprehensive command reference.
 
 pub(crate) fn help_text() -> String {
     "\
-═══ tplot — Terminal Data Analysis ═══
+═══ tplot — Terminal Data Analysis with Lineage Tracking ═══
 
 QUICK START
-  # Generate sample data (no CSV needed):
-  sql {CREATE TABLE auth AS SELECT * FROM (VALUES ('2024-01-01 10:00:01','root','192.168.1.100','failed'), ('2024-01-01 10:00:03','admin','10.0.0.5','failed'), ('2024-01-01 10:01:15','root','192.168.1.100','failed'), ('2024-01-01 10:02:30','deploy','172.16.0.1','failed'), ('2024-01-01 10:05:00','root','192.168.1.100','failed')) AS t(ts, username, src_ip, status)}
+  sql {CREATE TABLE auth AS SELECT 'root' as user, '10.0.0.1' as ip, 3 as attempts}
+  sql -name top {SELECT * FROM auth ORDER BY attempts DESC}
+  into logs --shell {grep Failed /var/log/auth.log} --csv
+  plot bar top user attempts
 
-  # Query it:
-  sql -name by_user {SELECT username, count(*) as attempts FROM auth GROUP BY username ORDER BY attempts DESC}
-  sql -name by_ip {SELECT src_ip, count(*) as attempts FROM auth GROUP BY src_ip ORDER BY attempts DESC}
-
-  # Or import a file:
-  into mytable -file /path/to/data.csv
-
-COMMANDS
-  ✓ into <table> <source> ?opts?       Import data into DuckDB
-  ✓ sql <query>                        Execute SQL, return result
-  ✓ derive <name> <sql>                Create child node from query
-  ✓ freeze                             Seal node (edits auto-branch)
-  ✓ run                                Re-execute current node script
-  ○ plot <type> <data> ?opts?          Render chart (gnuplot)
-  ○ export <result> -fmt -name <path>  Export data/chart to file
-  ○ stats <table> ?opts?               Summary statistics
-  ○ hist <table> <col>                 Histogram
-  ○ cdf <table> <col>                  CDF/CCDF plot
-  ○ corr <table> <col1> <col2>        Correlation
-  ○ budget -cpu N -ram XG -disk XG     Set resource limits
-  ○ node <id>                          Switch to node
-
-IMPORT FORMAT OPTIONS
-  -file <path>    Read from file (auto-detects csv/tsv/parquet/json)
-  -csv            Force CSV parsing
-  -tsv            Force TSV parsing
-  -json           JSON lines format
-  -sep <char>     Custom separator
-  -regex <pat> -cols {a b c}   Parse with regex capture groups
-  -gz -zstd -bz2              Decompression (auto-detected for -file)
-
-EXPORT FORMATS (planned)
-  -csv -jsonl -parquet         Data formats
-  -png -svg                    Chart formats
-  -name <path>                 Output file path
-
-NODE IDS
-  0, 1, 2...                   Root nodes (auto-numbered)
-  1.0, 1.1                     Children (dotted path)
-  1.base                       Named reference (via names.toml)
-  1.base.0                     Grandchild of named node
-
-EXAMPLES
-  # Import CSV and query
-  into flows -file /tmp/netflows.csv
-  sql {SELECT dst_ip, sum(bytes) as total FROM flows GROUP BY dst_ip ORDER BY total DESC LIMIT 10}
-
-  # Derive a filtered subset
-  derive tcp_only {SELECT * FROM flows WHERE protocol = 'tcp'}
-
-  # Import from command output (planned)
-  into auth [exec grep 'failed' /var/log/auth.log] -regex {^(\\S+).*user=(\\S+)} -cols {ts user}
-
-KEYS
-  F1          This help
+NAVIGATION
+  F1          Help (this screen)
   F2          Focus lineage tree
-  Ctrl+Q      Quit
-  Ctrl+C      Cancel running operation (on focused node)
+  F3          Focus main panel
+  F4          Focus tools panel (cmd editor)
+  F5          Zoom focused panel
+  F9          Execute current command (at cursor)
+  F10         Execute entire buffer
+  Ctrl-Q      Quit
+  Alt-x       Command line (M-x)
 
-STATUS ICONS (in lineage tree)
-  ✓  Materialized (data ready)
-  ▸  Active (user working here)
-  ❄  Frozen (sealed, edits branch)
-  ◇  Ghost (script only, no data)
-  ⚠  Stale (needs re-run)
-  >  Running (in progress)
+M-x COMMANDS (Alt-x, then type)
+  shell                     Open PTY shell in tools panel
+  kiro [--agent=name] [flags]  Launch AI agent with MCP connection
+  help                      Show this help
+  quit / q                  Exit tplot
+  <any Tcl>                 Evaluated directly (sql, into, plot, etc.)
+
+LINEAGE TREE (F2 panel)
+  j/k         Navigate up/down
+  Enter       Execute node (show data in main panel)
+  →           Execute + focus main panel
+  M-e         Copy node's command to editor
+  M-d         Delete node and descendants (with confirmation)
+  M-c         Clone node and descendants (appends _copy)
+
+CMD EDITOR (F4 panel, vi modes)
+  Ctrl-N      Completion dropdown (commands + table names)
+  i/a/o       Enter insert mode
+  Esc         Back to normal mode
+  :w          Save (session auto-saves on exit)
+  :q          Close tab
+
+TCL COMMANDS
+  sql {<query>}                         Execute SQL, display result
+  sql -name <table> {<query>}           Execute + create named node
+  into <table> -file <path>             Import CSV/TSV/JSON file
+  into <table> --shell {<cmd>} --csv    Import shell command output (async)
+  plot <type> <table> <col1> <col2>     Render chart (bar, line)
+  derive <name> {<sql>}                 Create derived query node
+  shell                                 Open terminal
+  kiro ?args?                           Launch AI agent
+  freeze                                Seal current node
+  run                                   Re-execute current node
+
+SQL DIALECT (DuckDB)
+  Full DuckDB SQL including:
+  - CREATE TABLE ... AS SELECT ...
+  - CREATE OR REPLACE VIEW ...
+  - Window functions, CTEs, UNNEST
+  - read_csv_auto(), read_parquet(), read_json()
+  - Aggregate functions, QUALIFY, PIVOT
+
+IMPORT OPTIONS
+  -file <path>              Read from file (auto-detect format)
+  --shell {<command>}       Pipe command stdout (async, parallel ingest)
+  --csv                     Force CSV parsing
+  --tsv                     Force TSV parsing
+  --json                    JSON lines format
+  -sep <char>               Custom separator
+
+ASYNC EXECUTION
+  Shell imports run in background:
+  - Node shows > (Running) in tree during execution
+  - You can continue working while import runs
+  - On completion: node flips to ✓ (UpToDate)
+  - DuckDB uses parallel CSV parser via FIFO pipe
+
+MCP SERVER (for AI agent integration)
+  tplot exposes tools via Unix socket (auto-started):
+    run_command       Execute any Tcl/SQL command
+    list_nodes        Get lineage graph
+    preview_table     Query table data (JSON)
+    get_editor_content   Read cmd editor
+    set_editor_content   Write to cmd editor
+
+  --mcp-server flag: runs as stdio↔socket bridge (launched by kiro)
+
+LINEAGE NODES
+  [T]  Table — materialized data (from sql CREATE or into)
+  [Q]  Query — derived view (from sql -name or derive)
+  [P]  Plot  — visualization (from plot command)
+
+STATUS ICONS
+  ○  Empty (never run)
+  ✓  Up to date
+  ⚠  Dirty (upstream changed)
+  >  Running (async in progress)
   ✗  Error (last run failed)
+
+SESSION PERSISTENCE
+  - Editor content saved to .tplot.state on exit
+  - Node definitions saved to nodes/*.tcl on creation
+  - Both restored on next launch
+
+FILES
+  .tplot/tplot.duckdb        DuckDB database
+  .tplot.state               Session state (editor content)
+  .tplot.log                 Application log
+  nodes/*.tcl                Persisted node definitions
+  .kiro/agents/tplot.json    Generated agent file for kiro
 "
     .to_string()
 }
