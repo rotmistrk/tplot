@@ -8,6 +8,7 @@ use txv_widgets::tiled_workspace::TiledWorkspace;
 use crate::lineage_data::LineageData;
 use crate::slots::SlotId;
 use crate::views::cmd_editor::CommandEditor;
+use crate::views::library::LibraryView;
 use crate::views::lineage_tree::LineageTreeView;
 use crate::views::placeholder::PlaceholderView;
 
@@ -47,7 +48,8 @@ fn add_left_tabs(ws: &mut TiledWorkspace, _root_dir: &Path) {
     let lineage_data = LineageData::empty();
     let lineage_view = LineageTreeView::new(lineage_data);
     ws.insert_tab(slot, "Lineage", Box::new(lineage_view));
-    insert(ws, slot, "Library", "Recipes & tools");
+    let library = LibraryView::with_project_dir(_root_dir);
+    ws.insert_tab(slot, "Library", Box::new(library));
     insert(ws, slot, "Todo", "Task tracking");
     if let Some(panel) = ws.panel_mut(slot) {
         panel.set_active(0);

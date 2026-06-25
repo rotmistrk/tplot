@@ -15,6 +15,7 @@ use crate::sql_analysis;
 use crate::status::{CM_APP_QUIT, CM_CONFIRM_ACTIVATE, CM_CONFIRM_RESPONSE, CM_EXECUTE_COMMAND, CM_SHOW_HELP};
 use crate::views::cmd_editor::{CommandEditor, CM_EDITOR_COMPLETE, CM_EXEC_BUFFER, CM_EXEC_LINE};
 use crate::views::help::HelpView;
+use crate::views::library::CM_RECIPE_LOAD;
 use crate::views::lineage_tree::{LineageTreeView, CM_NODE_CLONE, CM_NODE_DELETE, CM_NODE_EDIT, CM_NODE_SELECT, CM_NODE_SELECT_FOCUS};
 use crate::views::plot::PlotView;
 use crate::views::repl::{ReplView, CM_REPL_SUBMIT, CM_REPL_TAB};
@@ -121,6 +122,15 @@ pub fn handle_command(ctx: &mut CommandContext, state: &mut AppState) {
             }
         }
         CM_EXECUTE_COMMAND => handle_mx_command(ctx, state),
+        CM_RECIPE_LOAD => {
+            if let Some(content) = ctx.data().as_ref().and_then(|d| d.downcast_ref::<String>()) {
+                let content = content.clone();
+                if let Some(editor) = find_cmd_editor(ctx.desktop_mut()) {
+                    editor.set_content(&content);
+                }
+                status_msg(ctx, "Recipe loaded into editor");
+            }
+        }
         _ => {}
     }
 }

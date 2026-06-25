@@ -1,1 +1,3 @@
-[2026-06-20T16:12:35Z INFO  tplot::app] tplot: root=/home/rotmistr/Workplace/tplot, nodes=0
+[2026-06-23T01:16:24Z INFO  tplot] MCP server listening on /run/user/1000/tplot-2b88b739ee233609.sock
+[2026-06-23T01:16:24Z INFO  tplot::app] tplot: root=/home/rotmistr/Workplace/tplot, nodes=0
+[2026-06-23T01:16:52Z INFO  tplot::registry] persisted node 'test' to /home/rotmistr/Workplace/tplot/nodes
